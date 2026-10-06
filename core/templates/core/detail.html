@@ -5,6 +5,18 @@
 {% if next %}<form method="post" action="{% url 'transition' app.pk %}">{% csrf_token %}
 <label for="to">Action</label> <select id="to" name="to">{% for n in next %}<option>{{ n }}</option>{% endfor %}</select>
 {% if role == 'CREDIT_OFFICER' %}<label for="risk">Risk</label> <select id="risk" name="risk"><option>LOW</option><option>MEDIUM</option><option>HIGH</option></select>
-<label for="rec">Recommendation</label> <select id="rec" name="recommendation"><option>RECOMMEND_APPROVAL</option><option>RECOMMEND_REJECTION</option><option>REQUIRE_MORE_INFORMATION</option></select>{% endif %}
+<label for="rec">Recommendation</label> <select id="rec" name="recommendation"><option>RECOMMEND_APPROVAL</option><option>RECOMMEND_REJECTION</option><option>REQUIRE_MORE_INFORMATION</option></select><label for="ch">Credit history (simulated)</label> <select id="ch" name="credit_history"><option>GOOD</option><option>FAIR</option><option>POOR</option><option>NONE</option></select>{% endif %}
 <label for="note">Note / reason</label> <input id="note" name="note"> <button class="btn btn-primary">Apply</button></form>{% endif %}
+<h2 class="h5 mt-4">Repayment estimate</h2>
+<p>Monthly installment: <strong>{{ aff.installment }}</strong> UGX &middot; Disposable income: {{ aff.disposable }} UGX &middot;
+Affordability: {% if aff.affordable %}<span class="badge bg-success">Within means</span>{% else %}<span class="badge bg-danger">Stretch</span>{% endif %}
+<small class="text-muted">(simplified, no fees)</small></p>
+{% if app.guarantor_name %}<p>Guarantor: {{ app.guarantor_name }} {{ app.guarantor_phone }}</p>{% endif %}
+<h2 class="h5 mt-4">Documents</h2><ul>{% for d in docs %}<li><a href="{% url 'download' d.pk %}">{{ d.doc_type }}</a> &ndash; {{ d.status }} {{ d.comments }}
+{% if can_review %}<form method="post" action="{% url 'review_doc' d.pk %}" class="d-inline">{% csrf_token %}<input name="comments" aria-label="Comment" placeholder="comment">
+<button name="status" value="VERIFIED" class="btn btn-sm btn-success">Verify</button> <button name="status" value="REJECTED" class="btn btn-sm btn-danger">Reject</button></form>{% endif %}</li>{% empty %}<li>None uploaded.</li>{% endfor %}</ul>
+{% if can_upload %}<form method="post" action="{% url 'upload' app.pk %}" enctype="multipart/form-data">{% csrf_token %}
+<label for="dt">Type</label> <select id="dt" name="doc_type">{% for t in doc_types %}<option>{{ t }}</option>{% endfor %}</select>
+<label for="fl">File (PDF/JPG/PNG, max 5 MB)</label> <input id="fl" type="file" name="file"> <button class="btn btn-secondary">Upload</button></form>{% endif %}
+{% if sched %}<h2 class="h5 mt-4">Repayment schedule</h2><table class="table table-sm"><caption>Schedule</caption><tr><th>#</th><th>Due</th><th>Amount</th></tr>{% for i in sched %}<tr><td>{{ i.number }}</td><td>{{ i.due_date }}</td><td>{{ i.amount }}</td></tr>{% endfor %}</table>{% endif %}
 {% if trail %}<h2 class="h5 mt-4">Audit trail</h2><ul>{% for t in trail %}<li>{{ t.timestamp }} {{ t.user }}: {{ t.action }} {{ t.description }}</li>{% endfor %}</ul>{% endif %}{% endblock %}

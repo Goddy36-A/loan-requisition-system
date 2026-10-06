@@ -19,6 +19,7 @@ class Profile(models.Model):
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="profile")
     role = models.CharField(max_length=20, choices=Role.choices, default=Role.CUSTOMER)
     phone = models.CharField(max_length=30, blank=True)
+    nin = models.CharField("National ID number (NIN)", max_length=14, blank=True)
     def __str__(self): return f"{self.user} - {self.role}"
 
 class LoanProduct(models.Model):
@@ -44,7 +45,9 @@ class LoanApplication(models.Model):
     employer_name = models.CharField(max_length=100, blank=True)
     monthly_income = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     monthly_expenses = models.DecimalField(max_digits=14, decimal_places=2, default=0)
-    existing_debt = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    existing_debt = models.DecimalField(max_digits=14, decimal_places=2, default=0, help_text="Monthly debt repayments")
+    guarantor_name = models.CharField(max_length=100, blank=True, default="")
+    guarantor_phone = models.CharField(max_length=30, blank=True, default="")
     status = models.CharField(max_length=25, choices=Status.choices, default=Status.DRAFT, db_index=True)
     decision_reason = models.TextField(blank=True)
     decided_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
@@ -78,6 +81,8 @@ class Assessment(models.Model):
     recommendation = models.CharField(max_length=30, choices=[(x, x) for x in
         ("RECOMMEND_APPROVAL", "RECOMMEND_REJECTION", "REQUIRE_MORE_INFORMATION")])
     notes = models.TextField(blank=True)
+    credit_history = models.CharField(max_length=10, default="NONE", help_text="Simulated bureau result entered by officer",
+        choices=[(x, x) for x in ("GOOD", "FAIR", "POOR", "NONE")])
     created_at = models.DateTimeField(auto_now_add=True)
 
 class Notification(models.Model):
@@ -104,3 +109,14 @@ class SurveyAnswer(models.Model):
     score = models.PositiveSmallIntegerField()  # 1-5 Likert
     created_at = models.DateTimeField(auto_now_add=True)
     class Meta: unique_together = ("question", "respondent")
+
+class RepaymentInstallment(models.Model):
+    application = models.ForeignKey(LoanApplication, on_delete=models.CASCADE, related_name="schedule")
+    number = models.PositiveSmallIntegerField(); due_date = models.DateField()
+    amount = models.DecimalField(max_digits=14, decimal_places=2)
+    class Meta: ordering = ["number"]
+
+class SmsLog(models.Model):  # simulated SMS: nothing is actually sent
+    recipient = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="sms_log")
+    phone = models.CharField(max_length=30, blank=True); text = models.CharField(max_length=300)
+    created_at = models.DateTimeField(auto_now_add=True)

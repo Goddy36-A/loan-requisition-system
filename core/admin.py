@@ -7,3 +7,5 @@ for model in (m.Branch, m.Profile, m.LoanProduct, m.LoanApplication, m.Document,
 class AuditAdmin(admin.ModelAdmin):
     list_display = ("timestamp", "user", "action", "application")
     readonly_fields = [f.name for f in m.AuditLog._meta.fields]
+admin.site.register(m.RepaymentInstallment)
+admin.site.register(m.SmsLog)

@@ -1,0 +1,2 @@
+{% extends "core/base.html" %}{% block content %}<h1>My profile</h1><p>Phone and NIN are needed before you can submit a loan.</p>
+<form method="post">{% csrf_token %}{{ form.as_p }}<button class="btn btn-primary">Save</button></form>{% endblock %}

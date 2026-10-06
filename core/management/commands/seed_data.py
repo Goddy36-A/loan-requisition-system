@@ -22,6 +22,8 @@ class Command(BaseCommand):
                 u.set_password(pw)
             if name == "admin": u.is_staff = u.is_superuser = True
             u.save(); Profile.objects.get_or_create(user=u, defaults={"role": role})
+            if name == "customer1":  # fictional demo identity
+                Profile.objects.filter(user=u).update(nin="CM12345678ABCD", phone="+256700000001")
         for b in ["Kampala Main Branch", "Ntinda Branch", "Jinja Branch", "Mbarara Branch", "Entebbe Branch"]:
             Branch.objects.get_or_create(name=b)
         for n, lo, hi, rate, per in PRODUCTS:

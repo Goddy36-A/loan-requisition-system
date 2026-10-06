@@ -1,4 +1,4 @@
 {% extends "core/base.html" %}{% block content %}<h1>Research analytics</h1>
 <p>Applications: {{ total }} &middot; Avg hours submit-to-decision: {{ avg_hours|default:"n/a" }} &middot; Survey respondents: {{ n_responses }}</p>
 <ul>{% for s, n in by_status.items %}<li>{{ s }}: {{ n }}</li>{% endfor %}</ul>
-<h2 class="h5">Survey category means (1-5)</h2><ul>{% for c in cats %}<li>{{ c.question__category }}: {{ c.mean|floatformat:2 }}</li>{% empty %}<li>No responses yet.</li>{% endfor %}</ul>{% endblock %}
+<p><a href="{% url 'survey_csv' %}">Download survey CSV</a></p><h2 class="h5">Survey category means (1-5)</h2><ul>{% for c in cats %}<li>{{ c.question__category }}: {{ c.mean|floatformat:2 }}</li>{% empty %}<li>No responses yet.</li>{% endfor %}</ul>{% endblock %}

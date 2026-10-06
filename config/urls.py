@@ -12,6 +12,12 @@ urlpatterns = [
     path("apply/<int:product_id>/", views.apply, name="apply"),
     path("applications/<int:pk>/", views.detail, name="detail"),
     path("applications/<int:pk>/transition/", views.do_transition, name="transition"),
+    path("applications/<int:pk>/upload/", views.upload, name="upload"),
+    path("documents/<int:doc_id>/", views.download, name="download"),
+    path("documents/<int:doc_id>/review/", views.review_doc, name="review_doc"),
+    path("profile/", views.profile, name="profile"),
+    path("notifications/", views.notifications, name="notifications"),
+    path("analytics/survey.csv", views.survey_csv, name="survey_csv"),
     path("survey/", views.survey, name="survey"),
     path("analytics/", views.analytics, name="analytics"),
 ]

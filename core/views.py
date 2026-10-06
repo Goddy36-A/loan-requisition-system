@@ -22,7 +22,7 @@ class AppForm(forms.ModelForm):
     class Meta:
         model = LoanApplication
         fields = ["branch", "amount_requested", "purpose", "repayment_period", "employment_status",
-                  "employer_name", "monthly_income", "monthly_expenses", "existing_debt"]
+                  "employer_name", "monthly_income", "monthly_expenses", "existing_debt", "guarantor_name", "guarantor_phone"]
 
 @login_required
 def dashboard(request):
@@ -68,7 +68,9 @@ def _visible(user, pk):
 def detail(request, pk):
     app, role = _visible(request.user, pk)
     trail = app.auditlog_set.select_related("user") if role != Role.CUSTOMER else []
-    return render(request, "core/detail.html", {"app": app, "role": role, "trail": trail,
+    return render(request, "core/detail.html", {"app": app, "role": role, "trail": trail, "aff": services.affordability(app), "docs": app.documents.all(),
+        "sched": app.schedule.all(), "doc_types": DOC_TYPES, "can_review": role == Role.LOAN_OFFICER,
+        "can_upload": role == Role.CUSTOMER and app.status in (Status.DRAFT, Status.INFORMATION_REQUIRED),
         "next": sorted(services.ALLOWED.get(app.status, set()) & {t for t, rs in services.ROLES_FOR.items() if role in rs}),
         "assessments": app.assessments.all() if role != Role.CUSTOMER else []})
 
@@ -80,7 +82,7 @@ def do_transition(request, pk):
     try:
         if to == Status.MANAGER_REVIEW and role == Role.CREDIT_OFFICER:
             Assessment.objects.create(application=app, assessor=request.user, risk_level=request.POST.get("risk", "MEDIUM"),
-                recommendation=request.POST.get("recommendation", "REQUIRE_MORE_INFORMATION"), notes=request.POST.get("note", ""))
+                recommendation=request.POST.get("recommendation", "REQUIRE_MORE_INFORMATION"), credit_history=request.POST.get("credit_history", "NONE"), notes=request.POST.get("note", ""))
         services.transition(app, to, request.user, request.POST.get("note", "").strip())
     except ValidationError as e: messages.error(request, "; ".join(e.messages))
     return redirect("detail", pk)
@@ -107,3 +109,73 @@ def analytics(request):
            "avg_hours": round(statistics.mean(hrs), 2) if hrs else None, "cats": cats,
            "n_responses": SurveyAnswer.objects.values("respondent").distinct().count()}
     return render(request, "core/analytics.html", ctx)
+
+import csv, os, uuid
+from django.http import FileResponse, HttpResponse
+DOC_TYPES = ["National ID", "Payslip", "Employment Letter", "Bank Statement", "Passport Photo", "Supporting Document"]
+MAGIC = {".pdf": b"%PDF", ".png": b"\x89PNG", ".jpg": b"\xff\xd8", ".jpeg": b"\xff\xd8"}
+
+@login_required
+@require_POST
+def upload(request, pk):
+    app, role = _visible(request.user, pk)
+    if role != Role.CUSTOMER or app.status not in (Status.DRAFT, Status.INFORMATION_REQUIRED): raise PermissionDenied
+    f, dtype = request.FILES.get("file"), request.POST.get("doc_type")
+    ext = os.path.splitext(f.name)[1].lower() if f else ""
+    if not f or dtype not in DOC_TYPES: messages.error(request, "Choose a document type and file.")
+    elif ext not in MAGIC or f.size > 5 * 1024 * 1024 or not f.read(4).startswith(MAGIC[ext]):
+        messages.error(request, "Only genuine PDF/JPG/PNG files up to 5 MB are accepted.")
+    else:
+        f.seek(0); f.name = uuid.uuid4().hex + ext  # never trust the client filename
+        Document.objects.create(application=app, doc_type=dtype, file=f)
+        services.audit(request.user, "Document uploaded", app, dtype)
+    return redirect("detail", pk)
+
+@login_required
+def download(request, doc_id):
+    doc = get_object_or_404(Document, pk=doc_id)
+    _visible(request.user, doc.application_id)  # owner or staff only
+    return FileResponse(doc.file.open("rb"), as_attachment=True, filename=doc.doc_type.replace(" ", "_") + os.path.splitext(doc.file.name)[1])
+
+@login_required
+@require_POST
+def review_doc(request, doc_id):
+    doc = get_object_or_404(Document, pk=doc_id)
+    if services.role_of(request.user) != Role.LOAN_OFFICER: raise PermissionDenied
+    st = request.POST.get("status")
+    if st in ("VERIFIED", "REJECTED"):
+        doc.status, doc.reviewer, doc.comments = st, request.user, request.POST.get("comments", "")
+        doc.save(); services.audit(request.user, f"Document {st.lower()}", doc.application, doc.doc_type)
+        if st == "REJECTED":
+            Notification.objects.create(recipient=doc.application.customer, title="Document rejected",
+                notification_type="DOC_REJECTED", message=f"{doc.application.application_number}: {doc.doc_type} - {doc.comments}")
+    return redirect("detail", doc.application_id)
+
+class ProfileForm(forms.ModelForm):
+    class Meta: model = Profile; fields = ["phone", "nin"]
+    def clean_nin(self):
+        n = self.cleaned_data["nin"].strip().upper()
+        if n and (len(n) != 14 or not n.isalnum()): raise forms.ValidationError("NIN must be 14 letters/digits.")
+        return n
+
+@login_required
+def profile(request):
+    p, _ = Profile.objects.get_or_create(user=request.user)
+    form = ProfileForm(request.POST or None, instance=p)
+    if form.is_valid(): form.save(); messages.success(request, "Profile saved."); return redirect("profile")
+    return render(request, "core/profile.html", {"form": form})
+
+@login_required
+def notifications(request):
+    if request.method == "POST": request.user.notifications.update(is_read=True); return redirect("notifications")
+    return render(request, "core/notifications.html", {"notes": request.user.notifications.order_by("-created_at")[:50],
+        "sms": request.user.sms_log.order_by("-created_at")[:50]})
+
+@login_required
+def survey_csv(request):
+    if services.role_of(request.user) not in (Role.RESEARCH_ANALYST, Role.SYSTEM_ADMIN): raise PermissionDenied
+    resp = HttpResponse(content_type="text/csv"); resp["Content-Disposition"] = "attachment; filename=survey_responses.csv"
+    w = csv.writer(resp); w.writerow(["respondent_code", "category", "question", "score", "date"])
+    for a in SurveyAnswer.objects.select_related("question").order_by("respondent_id", "question_id"):
+        w.writerow([f"R{a.respondent_id}", a.question.category, a.question.text, a.score, a.created_at.date()])
+    return resp

@@ -1,0 +1,4 @@
+{% extends "core/base.html" %}{% block content %}<h1>Notifications</h1>
+<form method="post">{% csrf_token %}<button class="btn btn-sm btn-secondary">Mark all read</button></form>
+<ul class="mt-3">{% for n in notes %}<li>{% if not n.is_read %}<strong>NEW</strong> {% endif %}{{ n.created_at }} &ndash; <strong>{{ n.title }}</strong>: {{ n.message }}</li>{% empty %}<li>None.</li>{% endfor %}</ul>
+<h2 class="h5">Simulated SMS log</h2><ul>{% for s in sms %}<li>{{ s.created_at }} to {{ s.phone|default:"(no phone)" }}: {{ s.text }}</li>{% empty %}<li>None.</li>{% endfor %}</ul>{% endblock %}
