@@ -1,0 +1,4 @@
+{% extends "core/base.html" %}{% block content %}<h1>Loan products <small class="text-muted">(fictional)</small></h1>
+{% for p in products %}<div class="card mb-2"><div class="card-body"><h2 class="h5">{{ p.name }}</h2>
+<p>{{ p.min_amount }} &ndash; {{ p.max_amount }} UGX, {{ p.interest_rate }}%, up to {{ p.max_period_months }} months</p>
+<a class="btn btn-primary" href="{% url 'apply' p.pk %}">Apply</a></div></div>{% endfor %}{% endblock %}

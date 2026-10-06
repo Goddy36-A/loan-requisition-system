@@ -1,0 +1,4 @@
+{% extends "core/base.html" %}{% block content %}<h1>Research questionnaire</h1><p>1 = Strongly Disagree &hellip; 5 = Strongly Agree</p>
+<form method="post">{% csrf_token %}{% for q in questions %}<fieldset class="mb-3"><legend class="h6">{{ q.category }}: {{ q.text }}</legend>
+{% for i in "12345" %}<label class="me-3"><input type="radio" name="q{{ q.pk }}" value="{{ i }}"> {{ i }}</label>{% endfor %}</fieldset>{% endfor %}
+<button class="btn btn-primary">Submit</button></form>{% endblock %}

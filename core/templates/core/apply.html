@@ -1,0 +1,2 @@
+{% extends "core/base.html" %}{% block content %}<h1>Apply: {{ product.name }}</h1>
+<form method="post">{% csrf_token %}{{ form.as_p }}<button class="btn btn-secondary">Save draft</button> <button name="submit" value="1" class="btn btn-primary">Submit</button></form>{% endblock %}

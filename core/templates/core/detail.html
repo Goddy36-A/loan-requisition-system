@@ -1,0 +1,10 @@
+{% extends "core/base.html" %}{% block content %}<h1>{{ app.application_number }} <span class="badge bg-info">{{ app.status }}</span></h1>
+<p>{{ app.customer.username }} &middot; {{ app.loan_product }} &middot; {{ app.amount_requested }} UGX &middot; {{ app.branch }}</p><p>{{ app.purpose }}</p>
+{% if app.decision_reason %}<p><strong>Decision reason:</strong> {{ app.decision_reason }}</p>{% endif %}
+{% for a in assessments %}<p>Assessment: {{ a.risk_level }} / {{ a.recommendation }} &ndash; {{ a.notes }}</p>{% endfor %}
+{% if next %}<form method="post" action="{% url 'transition' app.pk %}">{% csrf_token %}
+<label for="to">Action</label> <select id="to" name="to">{% for n in next %}<option>{{ n }}</option>{% endfor %}</select>
+{% if role == 'CREDIT_OFFICER' %}<label for="risk">Risk</label> <select id="risk" name="risk"><option>LOW</option><option>MEDIUM</option><option>HIGH</option></select>
+<label for="rec">Recommendation</label> <select id="rec" name="recommendation"><option>RECOMMEND_APPROVAL</option><option>RECOMMEND_REJECTION</option><option>REQUIRE_MORE_INFORMATION</option></select>{% endif %}
+<label for="note">Note / reason</label> <input id="note" name="note"> <button class="btn btn-primary">Apply</button></form>{% endif %}
+{% if trail %}<h2 class="h5 mt-4">Audit trail</h2><ul>{% for t in trail %}<li>{{ t.timestamp }} {{ t.user }}: {{ t.action }} {{ t.description }}</li>{% endfor %}</ul>{% endif %}{% endblock %}

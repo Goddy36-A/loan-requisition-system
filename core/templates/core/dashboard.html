@@ -1,0 +1,6 @@
+{% extends "core/base.html" %}{% block content %}<h1>Dashboard <small class="text-muted">{{ role }}</small></h1>
+{% if counts %}<p>{% for s, n in counts.items %}{% if n %}<span class="badge bg-secondary me-1">{{ s }}: {{ n }}</span>{% endif %}{% endfor %}</p>{% endif %}
+{% if notes %}<h2 class="h5">Unread notifications</h2><ul>{% for n in notes %}<li><strong>{{ n.title }}</strong> &ndash; {{ n.message }}</li>{% endfor %}</ul>{% endif %}
+<table class="table"><caption>Applications</caption><tr><th>No.</th><th>Product</th><th>Amount</th><th>Status</th></tr>
+{% for a in apps %}<tr><td><a href="{% url 'detail' a.pk %}">{{ a.application_number }}</a></td><td>{{ a.loan_product }}</td><td>{{ a.amount_requested }}</td><td>{{ a.status }}</td></tr>
+{% empty %}<tr><td colspan="4">None.</td></tr>{% endfor %}</table>{% endblock %}
