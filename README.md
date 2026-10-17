@@ -55,3 +55,13 @@ Customers manage their details under **My account** (`/account/`): phone and Nat
 
 Existing customers keep working: after `python manage.py migrate` they simply need to add a bank account and a next of kin before
 their next submission. Applications already submitted are not affected. The sample customer (`customer1`) comes with both.
+
+## Works without internet
+
+The website needs no internet connection. Bootstrap 5.3.3 (MIT licence) is bundled in `core/static/core/vendor/bootstrap/`, fonts
+are the system's own, and no page loads anything from another host. The only time internet is needed is the very first run of
+`setup_and_run.py`, to download Django. After that the script works offline (if the network is down it carries on with what is
+already installed). A test (`tests/test_offline.py`) fails if a CDN link is ever added back.
+
+Note for later: bundled files are served by Django's development server. When the app is hosted with `DJANGO_DEBUG=0`, static
+files need a production setup (for example WhiteNoise plus `collectstatic`).

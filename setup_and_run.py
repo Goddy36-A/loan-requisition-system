@@ -14,6 +14,17 @@ def ps(script):
 def q(s): return "'" + str(s).replace("'", "''") + "'"
 def run(*a): subprocess.run([str(x) for x in a], cwd=ROOT, check=True)
 
+def install_requirements():
+    """Only the very first setup needs internet (to download Django). Once installed, pip finds nothing to download,
+    and if the network is down on a later start we simply carry on with what is already installed."""
+    try:
+        run(VPY, "-m", "pip", "install", "-q", "--disable-pip-version-check", "-r", "requirements.txt")
+    except subprocess.CalledProcessError:
+        if subprocess.run([str(VPY), "-c", "import django"], cwd=ROOT).returncode == 0:
+            print("Could not reach the package index; continuing with the packages that are already installed.")
+        else:
+            sys.exit("First-time setup needs an internet connection once, to install Django. Connect, then run this again.")
+
 def ensure_meta():
     if not META.exists():  # created once; never reset
         META.write_text(json.dumps({"project": "LoanRequisitionResearch",
@@ -64,7 +75,7 @@ def main():
     if a.test_expiration: return run(sys.executable, "autophagy.py", "--test")
     for d in ("logs", "media", "static"): (ROOT / d).mkdir(exist_ok=True)
     if not VPY.exists(): venv.create(ROOT / ".venv", with_pip=True)
-    run(VPY, "-m", "pip", "install", "-q", "-r", "requirements.txt")
+    install_requirements()
     if a.reset_db and (ROOT / "db.sqlite3").exists(): (ROOT / "db.sqlite3").unlink()  # metadata untouched
     run(VPY, "manage.py", "migrate")
     if not a.no_seed: run(VPY, "manage.py", "seed_data")
