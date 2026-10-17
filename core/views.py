@@ -68,10 +68,14 @@ def _visible(user, pk):
 def detail(request, pk):
     app, role = _visible(request.user, pk)
     trail = app.auditlog_set.select_related("user") if role != Role.CUSTOMER else []
+    latest_ids = {d.pk for d in services.latest_documents(app).values()}
+    show_checklist = app.status in (Status.DRAFT, Status.INFORMATION_REQUIRED, Status.DOCUMENT_REVIEW)
     return render(request, "core/detail.html", {"app": app, "role": role, "trail": trail, "aff": services.affordability(app), "docs": app.documents.all(),
-        "sched": app.schedule.all(), "doc_types": DOC_TYPES, "can_review": role == Role.LOAN_OFFICER,
+        "sched": app.schedule.all(), "doc_types": DOC_TYPES, "latest_ids": latest_ids,
+        "can_review": role == Role.LOAN_OFFICER and app.status == Status.DOCUMENT_REVIEW,
         "can_upload": role == Role.CUSTOMER and app.status in (Status.DRAFT, Status.INFORMATION_REQUIRED),
-        "next": sorted(services.ALLOWED.get(app.status, set()) & {t for t, rs in services.ROLES_FOR.items() if role in rs}),
+        "doc_problems": services.document_problems(app) if show_checklist else [],
+        "next": services.next_options(app, role),
         "assessments": app.assessments.all() if role != Role.CUSTOMER else []})
 
 @login_required
@@ -79,11 +83,12 @@ def detail(request, pk):
 def do_transition(request, pk):
     app, role = _visible(request.user, pk)
     to = request.POST.get("to", "")
+    assessment = None
+    if to == Status.MANAGER_REVIEW and role == Role.CREDIT_OFFICER:
+        assessment = {"risk_level": request.POST.get("risk"), "recommendation": request.POST.get("recommendation"),
+                      "credit_history": request.POST.get("credit_history", "NONE"), "notes": request.POST.get("note", "")}
     try:
-        if to == Status.MANAGER_REVIEW and role == Role.CREDIT_OFFICER:
-            Assessment.objects.create(application=app, assessor=request.user, risk_level=request.POST.get("risk", "MEDIUM"),
-                recommendation=request.POST.get("recommendation", "REQUIRE_MORE_INFORMATION"), credit_history=request.POST.get("credit_history", "NONE"), notes=request.POST.get("note", ""))
-        services.transition(app, to, request.user, request.POST.get("note", "").strip())
+        services.transition(app, to, request.user, request.POST.get("note", "").strip(), assessment=assessment)
     except ValidationError as e: messages.error(request, "; ".join(e.messages))
     return redirect("detail", pk)
 
@@ -93,7 +98,7 @@ def survey(request):
     if request.method == "POST":
         for q in qs:
             v = request.POST.get(f"q{q.pk}")
-            if v in "12345" and v:
+            if v in ("1", "2", "3", "4", "5"):
                 SurveyAnswer.objects.update_or_create(question=q, respondent=request.user, defaults={"score": int(v)})
         messages.success(request, "Thank you."); return redirect("dashboard")
     return render(request, "core/survey.html", {"questions": qs})
@@ -111,7 +116,7 @@ def analytics(request):
     return render(request, "core/analytics.html", ctx)
 
 import csv, os, uuid
-from django.http import FileResponse, HttpResponse
+from django.http import FileResponse, Http404, HttpResponse
 DOC_TYPES = ["National ID", "Payslip", "Employment Letter", "Bank Statement", "Passport Photo", "Supporting Document"]
 MAGIC = {".pdf": b"%PDF", ".png": b"\x89PNG", ".jpg": b"\xff\xd8", ".jpeg": b"\xff\xd8"}
 
@@ -135,13 +140,22 @@ def upload(request, pk):
 def download(request, doc_id):
     doc = get_object_or_404(Document, pk=doc_id)
     _visible(request.user, doc.application_id)  # owner or staff only
-    return FileResponse(doc.file.open("rb"), as_attachment=True, filename=doc.doc_type.replace(" ", "_") + os.path.splitext(doc.file.name)[1])
+    try: fh = doc.file.open("rb")
+    except FileNotFoundError: raise Http404("Document file is missing.")
+    services.audit(request.user, "Document downloaded", doc.application, doc.doc_type)
+    return FileResponse(fh, as_attachment=True, filename=doc.doc_type.replace(" ", "_") + os.path.splitext(doc.file.name)[1])
 
 @login_required
 @require_POST
 def review_doc(request, doc_id):
     doc = get_object_or_404(Document, pk=doc_id)
     if services.role_of(request.user) != Role.LOAN_OFFICER: raise PermissionDenied
+    if doc.application.status != Status.DOCUMENT_REVIEW:
+        messages.error(request, "Documents can only be reviewed while the application is in document review.")
+        return redirect("detail", doc.application_id)
+    if doc.pk not in {d.pk for d in services.latest_documents(doc.application).values()}:
+        messages.error(request, "That upload has been superseded by a newer one.")
+        return redirect("detail", doc.application_id)
     st = request.POST.get("status")
     if st in ("VERIFIED", "REJECTED"):
         doc.status, doc.reviewer, doc.comments = st, request.user, request.POST.get("comments", "")
@@ -156,6 +170,8 @@ class ProfileForm(forms.ModelForm):
     def clean_nin(self):
         n = self.cleaned_data["nin"].strip().upper()
         if n and (len(n) != 14 or not n.isalnum()): raise forms.ValidationError("NIN must be 14 letters/digits.")
+        if n and Profile.objects.filter(nin=n).exclude(pk=self.instance.pk).exists():
+            raise forms.ValidationError("This NIN is already registered to another account.")
         return n
 
 @login_required

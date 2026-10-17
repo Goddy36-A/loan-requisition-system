@@ -12,11 +12,11 @@
 Affordability: {% if aff.affordable %}<span class="badge bg-success">Within means</span>{% else %}<span class="badge bg-danger">Stretch</span>{% endif %}
 <small class="text-muted">(simplified, no fees)</small></p>
 {% if app.guarantor_name %}<p>Guarantor: {{ app.guarantor_name }} {{ app.guarantor_phone }}</p>{% endif %}
-<h2 class="h5 mt-4">Documents</h2><ul>{% for d in docs %}<li><a href="{% url 'download' d.pk %}">{{ d.doc_type }}</a> &ndash; {{ d.status }} {{ d.comments }}
-{% if can_review %}<form method="post" action="{% url 'review_doc' d.pk %}" class="d-inline">{% csrf_token %}<input name="comments" aria-label="Comment" placeholder="comment">
+<h2 class="h5 mt-4">Documents</h2>{% if doc_problems %}<div class="alert alert-warning py-2"><strong>Before credit assessment:</strong><ul class="mb-0">{% for p in doc_problems %}<li>{{ p }}</li>{% endfor %}</ul></div>{% endif %}<ul>{% for d in docs %}<li><a href="{% url 'download' d.pk %}">{{ d.doc_type }}</a> &ndash; {{ d.status }} {{ d.comments }}{% if d.pk not in latest_ids %} <small class="text-muted">(superseded)</small>{% endif %}
+{% if can_review and d.pk in latest_ids %}<form method="post" action="{% url 'review_doc' d.pk %}" class="d-inline">{% csrf_token %}<input name="comments" aria-label="Comment" placeholder="comment">
 <button name="status" value="VERIFIED" class="btn btn-sm btn-success">Verify</button> <button name="status" value="REJECTED" class="btn btn-sm btn-danger">Reject</button></form>{% endif %}</li>{% empty %}<li>None uploaded.</li>{% endfor %}</ul>
 {% if can_upload %}<form method="post" action="{% url 'upload' app.pk %}" enctype="multipart/form-data">{% csrf_token %}
 <label for="dt">Type</label> <select id="dt" name="doc_type">{% for t in doc_types %}<option>{{ t }}</option>{% endfor %}</select>
 <label for="fl">File (PDF/JPG/PNG, max 5 MB)</label> <input id="fl" type="file" name="file"> <button class="btn btn-secondary">Upload</button></form>{% endif %}
-{% if sched %}<h2 class="h5 mt-4">Repayment schedule</h2><table class="table table-sm"><caption>Schedule</caption><tr><th>#</th><th>Due</th><th>Amount</th></tr>{% for i in sched %}<tr><td>{{ i.number }}</td><td>{{ i.due_date }}</td><td>{{ i.amount }}</td></tr>{% endfor %}</table>{% endif %}
+{% if sched %}<h2 class="h5 mt-4">Repayment schedule</h2><table class="table table-sm"><caption>Schedule</caption><tr><th>#</th><th>Due</th><th>Installment</th><th>Principal</th><th>Interest</th><th>Balance</th></tr>{% for i in sched %}<tr><td>{{ i.number }}</td><td>{{ i.due_date }}</td><td>{{ i.amount }}</td><td>{{ i.principal }}</td><td>{{ i.interest }}</td><td>{{ i.balance }}</td></tr>{% endfor %}</table>{% endif %}
 {% if trail %}<h2 class="h5 mt-4">Audit trail</h2><ul>{% for t in trail %}<li>{{ t.timestamp }} {{ t.user }}: {{ t.action }} {{ t.description }}</li>{% endfor %}</ul>{% endif %}{% endblock %}

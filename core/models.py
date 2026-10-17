@@ -1,4 +1,6 @@
+from decimal import Decimal
 from django.conf import settings
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
 class Role(models.TextChoices):
@@ -10,6 +12,11 @@ class Status(models.TextChoices):
     INFORMATION_REQUIRED = "INFORMATION_REQUIRED"; CREDIT_ASSESSMENT = "CREDIT_ASSESSMENT"
     MANAGER_REVIEW = "MANAGER_REVIEW"; APPROVED = "APPROVED"; REJECTED = "REJECTED"
     WITHDRAWN = "WITHDRAWN"; COMPLETED = "COMPLETED"
+
+RISK_LEVELS = [(x, x) for x in ("LOW", "MEDIUM", "HIGH")]
+RECOMMENDATIONS = [(x, x) for x in ("RECOMMEND_APPROVAL", "RECOMMEND_REJECTION", "REQUIRE_MORE_INFORMATION")]
+CREDIT_HISTORY = [(x, x) for x in ("GOOD", "FAIR", "POOR", "NONE")]
+NON_NEGATIVE = [MinValueValidator(0)]
 
 class Branch(models.Model):
     name = models.CharField(max_length=100, unique=True)
@@ -38,14 +45,16 @@ class LoanApplication(models.Model):
     customer = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="applications")
     loan_product = models.ForeignKey(LoanProduct, on_delete=models.PROTECT)
     branch = models.ForeignKey(Branch, on_delete=models.PROTECT)
-    amount_requested = models.DecimalField(max_digits=14, decimal_places=2)
+    amount_requested = models.DecimalField(max_digits=14, decimal_places=2, validators=[MinValueValidator(Decimal("0.01"))])
     purpose = models.CharField(max_length=300)
-    repayment_period = models.PositiveIntegerField(help_text="months")
+    repayment_period = models.PositiveIntegerField(help_text="months", validators=[MinValueValidator(1)])
     employment_status = models.CharField(max_length=50, blank=True)
     employer_name = models.CharField(max_length=100, blank=True)
-    monthly_income = models.DecimalField(max_digits=14, decimal_places=2, default=0)
-    monthly_expenses = models.DecimalField(max_digits=14, decimal_places=2, default=0)
-    existing_debt = models.DecimalField(max_digits=14, decimal_places=2, default=0, help_text="Monthly debt repayments")
+    monthly_income = models.DecimalField(max_digits=14, decimal_places=2, default=0, validators=NON_NEGATIVE)
+    monthly_expenses = models.DecimalField(max_digits=14, decimal_places=2, default=0, validators=NON_NEGATIVE)
+    existing_debt = models.DecimalField(max_digits=14, decimal_places=2, default=0, help_text="Monthly debt repayments", validators=NON_NEGATIVE)
+    interest_rate = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True, editable=False,
+        help_text="Annual rate frozen from the product at submission, so later product edits do not change this loan")
     guarantor_name = models.CharField(max_length=100, blank=True, default="")
     guarantor_phone = models.CharField(max_length=30, blank=True, default="")
     status = models.CharField(max_length=25, choices=Status.choices, default=Status.DRAFT, db_index=True)
@@ -77,12 +86,11 @@ class Document(models.Model):
 class Assessment(models.Model):
     application = models.ForeignKey(LoanApplication, on_delete=models.CASCADE, related_name="assessments")
     assessor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
-    risk_level = models.CharField(max_length=10, choices=[("LOW",)*2, ("MEDIUM",)*2, ("HIGH",)*2])
-    recommendation = models.CharField(max_length=30, choices=[(x, x) for x in
-        ("RECOMMEND_APPROVAL", "RECOMMEND_REJECTION", "REQUIRE_MORE_INFORMATION")])
+    risk_level = models.CharField(max_length=10, choices=RISK_LEVELS)
+    recommendation = models.CharField(max_length=30, choices=RECOMMENDATIONS)
     notes = models.TextField(blank=True)
     credit_history = models.CharField(max_length=10, default="NONE", help_text="Simulated bureau result entered by officer",
-        choices=[(x, x) for x in ("GOOD", "FAIR", "POOR", "NONE")])
+        choices=CREDIT_HISTORY)
     created_at = models.DateTimeField(auto_now_add=True)
 
 class Notification(models.Model):
@@ -106,7 +114,7 @@ class SurveyQuestion(models.Model):
 class SurveyAnswer(models.Model):
     question = models.ForeignKey(SurveyQuestion, on_delete=models.CASCADE)
     respondent = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
-    score = models.PositiveSmallIntegerField()  # 1-5 Likert
+    score = models.PositiveSmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(5)])  # 1-5 Likert
     created_at = models.DateTimeField(auto_now_add=True)
     class Meta: unique_together = ("question", "respondent")
 
@@ -114,6 +122,10 @@ class RepaymentInstallment(models.Model):
     application = models.ForeignKey(LoanApplication, on_delete=models.CASCADE, related_name="schedule")
     number = models.PositiveSmallIntegerField(); due_date = models.DateField()
     amount = models.DecimalField(max_digits=14, decimal_places=2)
+    principal = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    interest = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    balance = models.DecimalField(max_digits=14, decimal_places=2, default=0, help_text="Principal outstanding after this installment")
+    paid_at = models.DateTimeField(null=True, blank=True)
     class Meta: ordering = ["number"]
 
 class SmsLog(models.Model):  # simulated SMS: nothing is actually sent
