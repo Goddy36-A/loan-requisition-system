@@ -3,54 +3,66 @@ from django import forms
 from django.contrib import messages
 from django.contrib.auth import login
 from django.contrib.auth.decorators import login_required
-from django.contrib.auth.forms import UserCreationForm
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db.models import Avg, DecimalField, ExpressionWrapper, F, Q, Sum
 from django.utils import timezone
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 from . import services
+from .forms import AppForm, BankAccountForm, NextOfKinForm, PaymentForm, ProfileForm, StyledRegisterForm, WitnessForm
 from .models import *
 
 def register(request):
-    form = UserCreationForm(request.POST or None)
+    form = StyledRegisterForm(request.POST or None)
     if form.is_valid():
         u = form.save(); Profile.objects.create(user=u, role=Role.CUSTOMER)
-        login(request, u); return redirect("dashboard")
+        login(request, u)
+        messages.success(request, "Welcome! Add your phone number, National ID, a bank account and next of kin so you can apply for a loan.")
+        return redirect("account")
     return render(request, "registration/register.html", {"form": form})
-
-class AppForm(forms.ModelForm):
-    class Meta:
-        model = LoanApplication
-        fields = ["branch", "amount_requested", "purpose", "repayment_period", "employment_status",
-                  "employer_name", "monthly_income", "monthly_expenses", "existing_debt", "guarantor_name", "guarantor_phone"]
 
 @login_required
 def dashboard(request):
     role = services.role_of(request.user)
     qs = LoanApplication.objects.select_related("customer", "loan_product", "branch").order_by("-created_at")
+    ctx = {"role": role, "notes": request.user.notifications.filter(is_read=False)[:5]}
     if role == Role.CUSTOMER or role is None:
         qs = qs.filter(customer=request.user)
     elif role == Role.RESEARCH_ANALYST:
         qs = qs.none()
     elif role in services.QUEUES:
         qs = qs.filter(status__in=services.QUEUES[role])
-    counts = {s: LoanApplication.objects.filter(customer=request.user, status=s).count() for s in Status.values} \
-        if role == Role.CUSTOMER else {}
-    notes = request.user.notifications.filter(is_read=False)[:5]
-    return render(request, "core/dashboard.html", {"apps": qs[:50], "role": role, "counts": counts, "notes": notes})
+        ctx["queue_counts"] = [(s, LoanApplication.objects.filter(status=s).count()) for s in services.QUEUES[role]]
+    if role == Role.CUSTOMER:
+        mine = LoanApplication.objects.filter(customer=request.user)
+        by = {s: mine.filter(status=s).count() for s in Status.values}
+        ctx["stats"] = {"drafts": by[Status.DRAFT], "in_progress": sum(by[s] for s in Status.values if s in services.IN_FLIGHT and s not in (Status.APPROVED, Status.DISBURSED)),
+                        "active": by[Status.APPROVED] + by[Status.DISBURSED], "completed": by[Status.COMPLETED]}
+        ctx["outstanding"] = sum((services.outstanding_total(a) for a in mine.filter(status=Status.DISBURSED)), 0)
+        ctx["readiness"] = services.account_readiness(request.user)
+    ctx["apps"] = qs[:50]
+    return render(request, "core/dashboard.html", ctx)
 
 @login_required
 def products(request):
-    return render(request, "core/products.html", {"products": LoanProduct.objects.filter(is_active=True)})
+    ctx = {"products": LoanProduct.objects.filter(is_active=True)}
+    if services.role_of(request.user) == Role.CUSTOMER:
+        ctx["can_apply"] = services.active_accounts(request.user).exists()
+        ctx["readiness"] = services.account_readiness(request.user)
+    return render(request, "core/products.html", ctx)
 
 @login_required
 def apply(request, product_id):
     if services.role_of(request.user) != Role.CUSTOMER: raise PermissionDenied
     product = get_object_or_404(LoanProduct, pk=product_id, is_active=True)
-    form = AppForm(request.POST or None)
+    if not services.active_accounts(request.user).exists():  # a loan needs somewhere to be paid into
+        messages.error(request, "Add a bank account before you apply for a loan.")
+        return redirect("account")
+    form = AppForm(request.POST or None, user=request.user)
     if form.is_valid():
-        app = form.save(commit=False); app.customer, app.loan_product = request.user, product; app.save()
+        app = form.save(commit=False); app.customer, app.loan_product = request.user, product
+        app.disbursement_account = form.cleaned_data.get("disbursement_account") or services.primary_account(request.user)
+        app.save()
         services.audit(request.user, "Application created", app)
         if "submit" in request.POST:
             try: services.transition(app, Status.SUBMITTED, request.user)
@@ -65,6 +77,25 @@ def _visible(user, pk):
     if role in (None, Role.RESEARCH_ANALYST): raise PermissionDenied
     return app, role
 
+PATH = [Status.DRAFT, Status.SUBMITTED, Status.DOCUMENT_REVIEW, Status.CREDIT_ASSESSMENT, Status.MANAGER_REVIEW, Status.APPROVED,
+        Status.DISBURSED, Status.COMPLETED]
+PATH_LABELS = {Status.DRAFT: "Draft", Status.SUBMITTED: "Submitted", Status.DOCUMENT_REVIEW: "Documents", Status.CREDIT_ASSESSMENT: "Credit check",
+               Status.MANAGER_REVIEW: "Manager review", Status.APPROVED: "Approved", Status.DISBURSED: "Disbursed", Status.COMPLETED: "Repaid"}
+
+def _stepper(app):
+    """Progress steps for the application page; None when the application was withdrawn."""
+    st = app.status
+    if st == Status.WITHDRAWN: return None
+    cur = PATH.index(Status.DOCUMENT_REVIEW if st == Status.INFORMATION_REQUIRED else Status.MANAGER_REVIEW if st == Status.REJECTED else st)
+    out = []
+    for i, s in enumerate(PATH):
+        state = "done" if i < cur or st == Status.COMPLETED else "current" if i == cur else "todo"
+        label = PATH_LABELS[s]
+        if i == cur and st == Status.REJECTED: state, label = "bad", "Rejected"
+        if i == cur and st == Status.INFORMATION_REQUIRED: label = "Info needed"
+        out.append({"label": label, "state": state})
+    return out
+
 @login_required
 def detail(request, pk):
     app, role = _visible(request.user, pk)
@@ -76,15 +107,27 @@ def detail(request, pk):
     sched = list(app.schedule.all())
     for i in sched: i.state_label, i.late_days = i.state(today), i.days_late(today)
     pct, grace = services.late_fee_policy()
+    is_owner = role == Role.CUSTOMER
+    editable = is_owner and app.status in services.EDITABLE
+    quick_submit = is_owner and app.status == Status.DRAFT
+    next_actions = services.next_options(app, role)
+    if quick_submit: next_actions = [n for n in next_actions if n != Status.SUBMITTED]
+    account = services.effective_account(app) if app.status in (Status.DRAFT, Status.INFORMATION_REQUIRED) else app.disbursement_account
     return render(request, "core/detail.html", {"app": app, "role": role, "trail": trail, "aff": services.affordability(app), "docs": app.documents.all(),
         "sched": sched, "doc_types": DOC_TYPES, "latest_ids": latest_ids,
         "summary": services.repayment_summary(app, today) if sched else None, "payments": app.payments.all(),
         "can_record_payment": role == Role.LOAN_OFFICER and app.status == Status.DISBURSED,
         "payment_methods": Payment.METHODS, "fee_percent": pct, "grace_days": grace,
         "can_review": role == Role.LOAN_OFFICER and app.status == Status.DOCUMENT_REVIEW,
-        "can_upload": role == Role.CUSTOMER and app.status in (Status.DRAFT, Status.INFORMATION_REQUIRED),
+        "can_upload": is_owner and app.status in (Status.DRAFT, Status.INFORMATION_REQUIRED),
         "doc_problems": services.document_problems(app) if show_checklist else [],
-        "next": services.next_options(app, role),
+        "next": next_actions, "quick_submit": quick_submit,
+        "submit_problems": services.submission_problems(app) if quick_submit else [],
+        "steps": _stepper(app), "is_owner": is_owner,
+        "witnesses": app.witnesses.all(), "can_edit_witnesses": editable, "witness_form": WitnessForm() if editable else None,
+        "max_witnesses": services.witness_limits()[1], "min_witnesses": services.witness_limits()[0],
+        "account": account, "account_choices": services.active_accounts(app.customer) if editable else [],
+        "applicant": app.customer, "kin": app.customer.next_of_kin.all(),
         "assessments": app.assessments.all() if role != Role.CUSTOMER else []})
 
 @login_required
@@ -100,12 +143,6 @@ def do_transition(request, pk):
         services.transition(app, to, request.user, request.POST.get("note", "").strip(), assessment=assessment)
     except ValidationError as e: messages.error(request, "; ".join(e.messages))
     return redirect("detail", pk)
-
-class PaymentForm(forms.Form):
-    amount = forms.DecimalField(min_value=0.01, max_digits=14, decimal_places=2)
-    method = forms.ChoiceField(choices=Payment.METHODS)
-    reference = forms.CharField(max_length=60, required=False)
-    paid_on = forms.DateField(required=False)
 
 @login_required
 @require_POST
@@ -215,21 +252,119 @@ def review_doc(request, doc_id):
                 notification_type="DOC_REJECTED", message=f"{doc.application.application_number}: {doc.doc_type} - {doc.comments}")
     return redirect("detail", doc.application_id)
 
-class ProfileForm(forms.ModelForm):
-    class Meta: model = Profile; fields = ["phone", "nin"]
-    def clean_nin(self):
-        n = self.cleaned_data["nin"].strip().upper()
-        if n and (len(n) != 14 or not n.isalnum()): raise forms.ValidationError("NIN must be 14 letters/digits.")
-        if n and Profile.objects.filter(nin=n).exclude(pk=self.instance.pk).exists():
-            raise forms.ValidationError("This NIN is already registered to another account.")
-        return n
+def _customer_only(request):
+    if services.role_of(request.user) != Role.CUSTOMER: raise PermissionDenied
+
+def _account_page(request, **forms_override):
+    u, role = request.user, services.role_of(request.user)
+    p, _ = Profile.objects.get_or_create(user=u)
+    ctx = {"role": role, "is_customer": role == Role.CUSTOMER, "profile_form": ProfileForm(instance=p)}
+    if role == Role.CUSTOMER:
+        ctx.update(accounts=services.active_accounts(u), kin=u.next_of_kin.all(), bank_form=BankAccountForm(user=u), kin_form=NextOfKinForm(),
+                   checklist=services.account_checklist(u), max_accounts=services.MAX_BANK_ACCOUNTS, max_kin=services.MAX_NEXT_OF_KIN,
+                   bank_names=BANK_NAMES)
+    ctx.update(forms_override)
+    return render(request, "core/account.html", ctx)
+
+BANK_NAMES = ["Absa Bank Uganda", "Bank of Africa Uganda", "Centenary Bank", "DFCU Bank", "Equity Bank Uganda", "Housing Finance Bank",
+              "KCB Bank Uganda", "PostBank Uganda", "Stanbic Bank Uganda", "Standard Chartered Uganda"]
 
 @login_required
-def profile(request):
+def account(request):
     p, _ = Profile.objects.get_or_create(user=request.user)
-    form = ProfileForm(request.POST or None, instance=p)
-    if form.is_valid(): form.save(); messages.success(request, "Profile saved."); return redirect("profile")
-    return render(request, "core/profile.html", {"form": form})
+    if request.method == "POST":
+        form = ProfileForm(request.POST, instance=p)
+        if form.is_valid():
+            form.save(); services.audit(request.user, "Profile updated"); messages.success(request, "Your details were saved.")
+            return redirect("account")
+        return _account_page(request, profile_form=form)
+    return _account_page(request)
+
+@login_required
+def profile(request):  # old address of the account page
+    return redirect("account")
+
+@login_required
+@require_POST
+def bank_add(request):
+    _customer_only(request)
+    form = BankAccountForm(request.POST, user=request.user)
+    if not form.is_valid(): return _account_page(request, bank_form=form)
+    try: services.add_bank_account(request.user, form.cleaned_data); messages.success(request, "Bank account added.")
+    except ValidationError as e: messages.error(request, "; ".join(e.messages))
+    return redirect("account")
+
+@login_required
+@require_POST
+def bank_primary(request, pk):
+    _customer_only(request)
+    services.set_primary_account(request.user, get_object_or_404(BankAccount, pk=pk, user=request.user, is_active=True))
+    messages.success(request, "Primary account updated.")
+    return redirect("account")
+
+@login_required
+@require_POST
+def bank_remove(request, pk):
+    _customer_only(request)
+    try:
+        services.remove_bank_account(request.user, get_object_or_404(BankAccount, pk=pk, user=request.user, is_active=True))
+        messages.success(request, "Bank account removed.")
+    except ValidationError as e: messages.error(request, "; ".join(e.messages))
+    return redirect("account")
+
+@login_required
+@require_POST
+def kin_add(request):
+    _customer_only(request)
+    form = NextOfKinForm(request.POST)
+    if not form.is_valid(): return _account_page(request, kin_form=form)
+    try: services.add_next_of_kin(request.user, form.cleaned_data); messages.success(request, "Next of kin added.")
+    except ValidationError as e: messages.error(request, "; ".join(e.messages))
+    return redirect("account")
+
+@login_required
+@require_POST
+def kin_remove(request, pk):
+    _customer_only(request)
+    try:
+        services.remove_next_of_kin(request.user, get_object_or_404(NextOfKin, pk=pk, user=request.user))
+        messages.success(request, "Next of kin removed.")
+    except ValidationError as e: messages.error(request, "; ".join(e.messages))
+    return redirect("account")
+
+def _flat_errors(form):
+    return "; ".join(f"{form.fields[k].label or k}: {' '.join(v)}" if k in form.fields else " ".join(v) for k, v in form.errors.items())
+
+@login_required
+@require_POST
+def witness_add(request, pk):
+    app, role = _visible(request.user, pk)
+    form = WitnessForm(request.POST)
+    if form.is_valid():
+        try: services.add_witness(app, request.user, form.cleaned_data); messages.success(request, "Witness added.")
+        except ValidationError as e: messages.error(request, "; ".join(e.messages))
+    else: messages.error(request, _flat_errors(form))
+    return redirect("detail", pk)
+
+@login_required
+@require_POST
+def witness_remove(request, pk):
+    w = get_object_or_404(Witness, pk=pk)
+    _visible(request.user, w.application_id)
+    try: services.remove_witness(request.user, w); messages.success(request, "Witness removed.")
+    except ValidationError as e: messages.error(request, "; ".join(e.messages))
+    return redirect("detail", w.application_id)
+
+@login_required
+@require_POST
+def choose_account(request, pk):
+    app, role = _visible(request.user, pk)
+    acct = BankAccount.objects.filter(pk=request.POST.get("account") or 0, user=request.user).first()
+    if not acct: messages.error(request, "Choose one of your own bank accounts.")
+    else:
+        try: services.set_disbursement_account(app, request.user, acct); messages.success(request, "Payout account updated.")
+        except ValidationError as e: messages.error(request, "; ".join(e.messages))
+    return redirect("detail", pk)
 
 @login_required
 def notifications(request):

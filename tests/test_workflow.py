@@ -21,6 +21,7 @@ class WorkflowTests(TestCase):
         self.client.force_login(other)
         self.assertEqual(self.client.get(f"/applications/{self.app.pk}/").status_code, 403)
     def test_flow_start(self):
+        Witness.objects.create(application=self.app, full_name="W", phone="+256700555001", relationship="Friend")
         services.transition(self.app, Status.SUBMITTED, self.c)
         services.transition(self.app, Status.DOCUMENT_REVIEW, self.lo)
         self.assertEqual(Notification.objects.filter(recipient=self.c).count(), 1)

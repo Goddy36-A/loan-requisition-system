@@ -18,7 +18,8 @@ MIDDLEWARE = ["django.middleware.security.SecurityMiddleware", "django.contrib.s
 ROOT_URLCONF = "config.urls"
 TEMPLATES = [{"BACKEND": "django.template.backends.django.DjangoTemplates", "DIRS": [], "APP_DIRS": True,
     "OPTIONS": {"context_processors": ["django.template.context_processors.request",
-    "django.contrib.auth.context_processors.auth", "django.contrib.messages.context_processors.messages"]}}]
+    "django.contrib.auth.context_processors.auth", "django.contrib.messages.context_processors.messages",
+    "core.context.ui"]}}]
 WSGI_APPLICATION = "config.wsgi.application"
 DATABASES = {"default": {"ENGINE": "django.db.backends.sqlite3", "NAME": BASE_DIR / "db.sqlite3"}}
 TIME_ZONE = "Africa/Kampala"; USE_TZ = True
@@ -35,3 +36,10 @@ LOGGING = {"version": 1, "handlers": {"f": {"class": "logging.FileHandler", "fil
 LATE_FEE_PERCENT = os.environ.get("LATE_FEE_PERCENT", "5")
 LATE_FEE_GRACE_DAYS = int(os.environ.get("LATE_FEE_GRACE_DAYS", "3"))
 REMINDER_DAYS_BEFORE = int(os.environ.get("REMINDER_DAYS_BEFORE", "3"))
+
+# Loan applications need this many witnesses (and may have at most MAX_WITNESSES).
+MIN_WITNESSES = int(os.environ.get("MIN_WITNESSES", "1"))
+MAX_WITNESSES = int(os.environ.get("MAX_WITNESSES", "3"))
+
+from django.contrib.messages import constants as _m
+MESSAGE_TAGS = {_m.ERROR: "danger"}  # so messages.error renders as a red Bootstrap alert

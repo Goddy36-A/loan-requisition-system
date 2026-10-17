@@ -25,6 +25,7 @@ class FeatureTests(TestCase):
         o = User.objects.create_user("c2", password="x"); Profile.objects.create(user=o); self.client.force_login(o)
         self.assertEqual(self.client.get(f"/documents/{d.pk}/").status_code, 403)
     def test_submission_sends_sms(self):
+        Witness.objects.create(application=self.app, full_name="W", phone="+256700555001", relationship="Friend")
         services.transition(self.app, Status.SUBMITTED, self.c)
         self.assertEqual(SmsLog.objects.filter(recipient=self.c).count(), 1)
     def test_csv_requires_research_role(self):

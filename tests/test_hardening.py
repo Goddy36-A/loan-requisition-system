@@ -17,9 +17,12 @@ class Base(TestCase):
         self.c, self.lo, self.co, self.mg = g(username="customer1"), g(username="loanofficer"), g(username="creditofficer"), g(username="manager")
         self.p = LoanProduct.objects.get(name="Personal Loan")
 
-    def app(self, **kw):
-        return LoanApplication.objects.create(customer=self.c, loan_product=self.p, branch=Branch.objects.first(), purpose="x",
+    def app(self, witness=True, **kw):
+        a = LoanApplication.objects.create(customer=self.c, loan_product=self.p, branch=Branch.objects.first(), purpose="x",
             amount_requested=kw.pop("amt", 1000000), repayment_period=kw.pop("per", 12), monthly_income=2000000, **kw)
+        if witness:
+            Witness.objects.create(application=a, full_name="Test Witness", phone="+256700555001", relationship="Friend")
+        return a
 
     def doc(self, app, typ, status="VERIFIED", name="a.pdf"):
         return Document.objects.create(application=app, doc_type=typ, file="private/" + name, status=status)

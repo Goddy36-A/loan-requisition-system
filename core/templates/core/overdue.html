@@ -1,5 +1,10 @@
-{% extends "core/base.html" %}{% block content %}<h1>Overdue installments</h1>
-<p>{{ rows|length }} installment{{ rows|length|pluralize }} on {{ loans }} loan{{ loans|pluralize }} &middot; Total owed: <strong>{{ total }}</strong> UGX (of which late fees {{ fees }} UGX)</p>
-<table class="table table-sm"><caption>Overdue installments</caption><tr><th>Application</th><th>Customer</th><th>Installment</th><th>Due</th><th>Days late</th><th>Owed (UGX)</th><th>Late fee unpaid</th></tr>
-{% for r in rows %}<tr><td><a href="{% url 'detail' r.application_id %}">{{ r.application.application_number }}</a></td><td>{{ r.application.customer.username }}</td><td>{{ r.number }}</td><td>{{ r.due_date }}</td><td>{{ r.late_days }}</td><td>{{ r.outstanding }}</td><td>{{ r.fee_due }}</td></tr>
-{% empty %}<tr><td colspan="7">Nothing overdue.</td></tr>{% endfor %}</table>{% endblock %}
+{% extends "core/base.html" %}{% load ui %}{% block title %}Overdue installments{% endblock %}{% block content %}
+<h1>Overdue installments</h1>
+<div class="row g-3 mb-4"><div class="col-6 col-md-4"><div class="card stat h-100"><div class="k">Total owed</div><div class="v">{{ total|money }}</div><div class="s">UGX, of which late fees {{ fees|money }}</div></div></div>
+ <div class="col-6 col-md-4"><div class="card stat h-100"><div class="k">Installments</div><div class="v">{{ rows|length }}</div><div class="s">overdue</div></div></div>
+ <div class="col-6 col-md-4"><div class="card stat h-100"><div class="k">Loans</div><div class="v">{{ loans }}</div><div class="s">with overdue installments</div></div></div></div>
+<p class="visually-hidden">{{ rows|length }} installment{{ rows|length|pluralize }} on {{ loans }} loan{{ loans|pluralize }}</p>
+<div class="card"><div class="table-responsive"><table class="table table-modern"><caption class="visually-hidden">Overdue installments</caption>
+<thead><tr><th>Application</th><th>Customer</th><th>Installment</th><th>Due</th><th class="num">Days late</th><th class="num">Owed (UGX)</th><th class="num">Late fee unpaid</th></tr></thead><tbody>
+{% for r in rows %}<tr><td><a class="text-decoration-none fw-semibold" href="{% url 'detail' r.application_id %}">{{ r.application.application_number }}</a></td><td>{{ r.application.customer.username }}</td><td>{{ r.number }}</td><td>{{ r.due_date|date:"d M Y" }}</td><td class="num"><span class="pill st-bad">{{ r.late_days }}</span></td><td class="num">{{ r.outstanding|money }}</td><td class="num">{{ r.fee_due|money }}</td></tr>
+{% empty %}<tr><td colspan="7" class="empty">Nothing overdue.</td></tr>{% endfor %}</tbody></table></div></div>{% endblock %}

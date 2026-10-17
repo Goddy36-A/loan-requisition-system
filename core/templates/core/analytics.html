@@ -1,5 +1,21 @@
-{% extends "core/base.html" %}{% block content %}<h1>Research analytics</h1>
-<p>Applications: {{ total }} &middot; Avg hours submit-to-decision: {{ avg_hours|default:"n/a" }} &middot; Survey respondents: {{ n_responses }}</p>
-<ul>{% for s, n in by_status.items %}<li>{{ s }}: {{ n }}</li>{% endfor %}</ul>
-<h2 class="h5">Loan book</h2><p>Disbursed: {{ book.disbursed }} UGX &middot; Collected: {{ book.collected }} UGX &middot; Outstanding: {{ book.outstanding }} UGX &middot; Overdue: {{ book.overdue }} UGX &middot; Late fees charged: {{ book.late_fees }} UGX</p>
-<p><a href="{% url 'survey_csv' %}">Download survey CSV</a></p><h2 class="h5">Survey category means (1-5)</h2><ul>{% for c in cats %}<li>{{ c.question__category }}: {{ c.mean|floatformat:2 }}</li>{% empty %}<li>No responses yet.</li>{% endfor %}</ul>{% endblock %}
+{% extends "core/base.html" %}{% load ui %}{% block title %}Analytics{% endblock %}{% block content %}
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3"><h1 class="mb-0">Analytics</h1><a class="btn btn-outline-primary btn-sm" href="{% url 'survey_csv' %}">Download survey CSV</a></div>
+<div class="row g-3 mb-4">
+ <div class="col-6 col-lg-3"><div class="card stat h-100"><div class="k">Applications</div><div class="v">{{ total }}</div></div></div>
+ <div class="col-6 col-lg-3"><div class="card stat h-100"><div class="k">Avg. hours to decision</div><div class="v">{{ avg_hours|default:"n/a" }}</div><div class="s">submit to decision</div></div></div>
+ <div class="col-6 col-lg-3"><div class="card stat h-100"><div class="k">Survey respondents</div><div class="v">{{ n_responses }}</div></div></div>
+</div>
+<h2 class="h5">Loan book</h2>
+<div class="row g-3 mb-4">
+ <div class="col-6 col-lg"><div class="card stat h-100"><div class="k">Disbursed</div><div class="v fs-4">{{ book.disbursed|money }}</div><div class="s">UGX</div></div></div>
+ <div class="col-6 col-lg"><div class="card stat h-100"><div class="k">Collected</div><div class="v fs-4">{{ book.collected|money }}</div><div class="s">UGX</div></div></div>
+ <div class="col-6 col-lg"><div class="card stat h-100"><div class="k">Outstanding</div><div class="v fs-4">{{ book.outstanding|money }}</div><div class="s">UGX</div></div></div>
+ <div class="col-6 col-lg"><div class="card stat h-100"><div class="k">Overdue</div><div class="v fs-4">{{ book.overdue|money }}</div><div class="s">UGX</div></div></div>
+ <div class="col-6 col-lg"><div class="card stat h-100"><div class="k">Late fees charged</div><div class="v fs-4">{{ book.late_fees|money }}</div><div class="s">UGX</div></div></div>
+</div>
+<div class="row g-4">
+ <div class="col-lg-5"><div class="card"><div class="card-header">Applications by status</div><ul class="list-group list-group-flush">
+  {% for s, n in by_status.items %}<li class="list-group-item d-flex justify-content-between"><span class="pill {{ s|status_class }}">{{ s|status_label }}</span><strong>{{ n }}</strong></li>{% endfor %}</ul></div></div>
+ <div class="col-lg-7"><div class="card"><div class="card-header">Survey category means (1-5)</div><ul class="list-group list-group-flush">
+  {% for c in cats %}<li class="list-group-item d-flex justify-content-between"><span>{{ c.question__category }}</span><strong>{{ c.mean|floatformat:2 }}</strong></li>{% empty %}<li class="list-group-item text-muted">No responses yet.</li>{% endfor %}</ul></div></div>
+</div>{% endblock %}

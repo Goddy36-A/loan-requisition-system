@@ -230,7 +230,7 @@ class ViewTests(Loan):
     def test_detail_pages_render_for_customer_and_staff(self):
         app = self.disbursed(); self.pay(app, 1234)
         self.client.force_login(self.c); r = self.client.get(f"/applications/{app.pk}/")
-        self.assertContains(r, "settle in full"); self.assertContains(r, "1234.00"); self.assertNotContains(r, "Record payment")
+        self.assertContains(r, "settle in full"); self.assertContains(r, "1,234.00"); self.assertNotContains(r, "Record payment")
         self.client.force_login(self.lo); self.assertContains(self.client.get(f"/applications/{app.pk}/"), "Record payment")
 
     def test_detail_page_assesses_late_fees_lazily(self):
@@ -261,4 +261,4 @@ class ViewTests(Loan):
             self.client.force_login(u); self.assertEqual(self.client.get("/").status_code, code)
         self.client.force_login(self.lo); self.assertContains(self.client.get("/"), app.application_number)  # active loans visible to officer
         self.client.force_login(User.objects.get(username="admin"))
-        r = self.client.get("/analytics/"); self.assertContains(r, "Loan book"); self.assertContains(r, "Collected: 1000")
+        r = self.client.get("/analytics/"); self.assertContains(r, "Loan book"); self.assertContains(r, "Collected"); self.assertContains(r, "1,000.00")

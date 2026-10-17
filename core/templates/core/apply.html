@@ -1,2 +1,29 @@
-{% extends "core/base.html" %}{% block content %}<h1>Apply: {{ product.name }}</h1>
-<form method="post">{% csrf_token %}{{ form.as_p }}<button class="btn btn-secondary">Save draft</button> <button name="submit" value="1" class="btn btn-primary">Submit</button></form>{% endblock %}
+{% extends "core/base.html" %}{% load ui %}{% block title %}Apply: {{ product.name }}{% endblock %}{% block content %}
+<a class="text-decoration-none small" href="{% url 'products' %}">&larr; All loan products</a>
+<h1 class="mt-1">Apply: {{ product.name }}</h1>
+<form method="post" class="row g-4 mt-0">{% csrf_token %}
+ <div class="col-lg-8">
+  {% if form.non_field_errors %}<div class="alert alert-danger" role="alert">{{ form.non_field_errors }}</div>{% endif %}
+  <div class="card mb-4"><div class="card-header">The loan</div><div class="card-body"><div class="row">
+   <div class="col-md-6">{% include "core/_field.html" with field=form.branch %}</div>
+   <div class="col-md-6">{% include "core/_field.html" with field=form.disbursement_account %}</div>
+   <div class="col-md-6">{% include "core/_field.html" with field=form.amount_requested %}</div>
+   <div class="col-md-6">{% include "core/_field.html" with field=form.repayment_period %}</div>
+   <div class="col-12">{% include "core/_field.html" with field=form.purpose %}</div></div></div></div>
+  <div class="card mb-4"><div class="card-header">Your income</div><div class="card-body"><div class="row">
+   <div class="col-md-6">{% include "core/_field.html" with field=form.employment_status %}</div>
+   <div class="col-md-6">{% include "core/_field.html" with field=form.employer_name %}</div>
+   <div class="col-md-4">{% include "core/_field.html" with field=form.monthly_income %}</div>
+   <div class="col-md-4">{% include "core/_field.html" with field=form.monthly_expenses %}</div>
+   <div class="col-md-4">{% include "core/_field.html" with field=form.existing_debt %}</div></div></div></div>
+  <div class="card"><div class="card-header">Guarantor <span class="text-muted fw-normal">(optional)</span></div><div class="card-body"><div class="row">
+   <div class="col-md-6">{% include "core/_field.html" with field=form.guarantor_name %}</div>
+   <div class="col-md-6">{% include "core/_field.html" with field=form.guarantor_phone %}</div></div></div></div>
+ </div>
+ <div class="col-lg-4"><div class="card position-sticky" style="top:1rem"><div class="card-body">
+  <p class="section-title">Product summary</p>
+  <dl class="kv mb-3"><dt>Interest</dt><dd>{{ product.interest_rate }}% per year</dd><dt>Amount</dt><dd class="money">{{ product.min_amount|money }} &ndash; {{ product.max_amount|money }} UGX</dd><dt>Period</dt><dd>up to {{ product.max_period_months }} months</dd></dl>
+  <p class="small text-muted">Before you submit you will also need your National ID, a next of kin on your account, and at least one witness to this application. You can add the witness and upload documents after saving.</p>
+  <div class="d-grid gap-2"><button name="submit" value="1" class="btn btn-primary">Submit application</button><button class="btn btn-outline-primary">Save as draft</button></div>
+ </div></div></div>
+</form>{% endblock %}

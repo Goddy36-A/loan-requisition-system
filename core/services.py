@@ -7,6 +7,7 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.utils import timezone
 from .models import *
+from .validators import normalise_phone
 
 S, R = Status, Role
 CENT = Decimal("0.01")
@@ -52,6 +53,147 @@ def next_options(app, role):
 
 def audit(user, action, app=None, desc=""):
     AuditLog.objects.create(user=user, action=action, application=app, description=desc)
+
+# ---- customer account: bank accounts, next of kin, witnesses ---------------------------------------
+MAX_BANK_ACCOUNTS, MAX_NEXT_OF_KIN = 5, 5
+EDITABLE = (S.DRAFT, S.INFORMATION_REQUIRED)  # statuses in which the customer may still change an application
+IN_FLIGHT = [S.SUBMITTED, S.DOCUMENT_REVIEW, S.INFORMATION_REQUIRED, S.CREDIT_ASSESSMENT, S.MANAGER_REVIEW, S.APPROVED, S.DISBURSED]
+
+def witness_limits():
+    return int(getattr(settings, "MIN_WITNESSES", 1)), int(getattr(settings, "MAX_WITNESSES", 3))
+
+def active_accounts(user):
+    return user.bank_accounts.filter(is_active=True)
+
+def primary_account(user):
+    accounts = active_accounts(user)
+    return accounts.filter(is_primary=True).first() or accounts.first()
+
+def effective_account(app):
+    """The account the loan will be paid into: the one chosen on the application, else the customer's primary."""
+    a = app.disbursement_account
+    return a if a and a.is_active and a.user_id == app.customer_id else primary_account(app.customer)
+
+def account_checklist(user):
+    """(label, done, message-if-missing) for everything a customer needs on their account before applying."""
+    pr = getattr(user, "profile", None)
+    return [("Phone number", bool(pr and pr.phone), "Add your phone number."),
+            ("National ID number (NIN)", bool(pr and pr.nin), "Add your National ID number (NIN)."),
+            ("Bank account", active_accounts(user).exists(), "Add a bank account to receive the loan."),
+            ("Next of kin", user.next_of_kin.exists(), "Add at least one next of kin.")]
+
+def account_readiness(user):
+    return [msg for _, ok, msg in account_checklist(user) if not ok]
+
+def submission_problems(app):
+    """Everything still missing before this application can be submitted (empty list = ready)."""
+    p, problems = app.loan_product, []
+    if not (p.min_amount <= app.amount_requested <= p.max_amount) or not (1 <= app.repayment_period <= p.max_period_months):
+        problems.append("Amount or repayment period outside product limits.")
+    problems += account_readiness(app.customer)
+    need, _ = witness_limits()
+    if app.witnesses.count() < need:
+        problems.append(f"Add at least {need} witness{'' if need == 1 else 'es'} to this application.")
+    return problems
+
+def _require_customer(user):
+    if role_of(user) != R.CUSTOMER: raise PermissionDenied("Customers only.")
+
+@transaction.atomic
+def add_bank_account(user, data):
+    _require_customer(user)
+    if active_accounts(user).count() >= MAX_BANK_ACCOUNTS:
+        raise ValidationError(f"You can keep at most {MAX_BANK_ACCOUNTS} bank accounts. Remove one first.")
+    if active_accounts(user).filter(bank_name__iexact=data["bank_name"], account_number=data["account_number"]).exists():
+        raise ValidationError("This bank account is already on your profile.")
+    acct = BankAccount.objects.create(user=user, bank_name=data["bank_name"].strip(), account_name=data["account_name"].strip(),
+        account_number=data["account_number"], branch_name=(data.get("branch_name") or "").strip(),
+        is_primary=not active_accounts(user).exists())  # the first account is the primary one
+    audit(user, "Bank account added", None, f"{acct.bank_name} {acct.masked}")
+    return acct
+
+@transaction.atomic
+def set_primary_account(user, account):
+    _require_customer(user)
+    if account.user_id != user.id or not account.is_active: raise PermissionDenied
+    active_accounts(user).exclude(pk=account.pk).update(is_primary=False)
+    account.is_primary = True; account.save(update_fields=["is_primary"])
+    audit(user, "Primary bank account changed", None, f"{account.bank_name} {account.masked}")
+
+@transaction.atomic
+def remove_bank_account(user, account):
+    """Archive an account. Refused while a loan that uses it is in progress or being repaid."""
+    _require_customer(user)
+    if account.user_id != user.id or not account.is_active: raise PermissionDenied
+    if LoanApplication.objects.filter(disbursement_account=account, status__in=IN_FLIGHT).exists():
+        raise ValidationError("This account is linked to a loan that is in progress or being repaid, so it cannot be removed yet.")
+    LoanApplication.objects.filter(disbursement_account=account, status=S.DRAFT).update(disbursement_account=None)
+    was_primary = account.is_primary
+    account.is_active = account.is_primary = False; account.save(update_fields=["is_active", "is_primary"])
+    if was_primary:
+        nxt = active_accounts(user).first()
+        if nxt: nxt.is_primary = True; nxt.save(update_fields=["is_primary"])
+    audit(user, "Bank account removed", None, f"{account.bank_name} {account.masked}")
+
+@transaction.atomic
+def add_next_of_kin(user, data):
+    _require_customer(user)
+    if user.next_of_kin.count() >= MAX_NEXT_OF_KIN:
+        raise ValidationError(f"You can list at most {MAX_NEXT_OF_KIN} next of kin.")
+    kin = NextOfKin.objects.create(user=user, full_name=data["full_name"].strip(), relationship=data["relationship"],
+        phone=normalise_phone(data["phone"]), address=(data.get("address") or "").strip())
+    audit(user, "Next of kin added", None, f"{kin.full_name} ({kin.relationship})")
+    return kin
+
+@transaction.atomic
+def remove_next_of_kin(user, kin):
+    _require_customer(user)
+    if kin.user_id != user.id: raise PermissionDenied
+    if user.next_of_kin.count() <= 1 and LoanApplication.objects.filter(customer=user, status__in=IN_FLIGHT).exists():
+        raise ValidationError("You need at least one next of kin while a loan is in progress. Add another before removing this one.")
+    audit(user, "Next of kin removed", None, f"{kin.full_name} ({kin.relationship})")
+    kin.delete()
+
+def _own_editable_application(app, user, what):
+    if role_of(user) != R.CUSTOMER or app.customer_id != user.id: raise PermissionDenied
+    if app.status not in EDITABLE:
+        raise ValidationError(f"{what} can only be changed while the application is a draft or waiting for more information.")
+
+@transaction.atomic
+def add_witness(app, user, data):
+    app = LoanApplication.objects.select_for_update().get(pk=app.pk)
+    _own_editable_application(app, user, "Witnesses")
+    _, most = witness_limits()
+    if app.witnesses.count() >= most:
+        raise ValidationError(f"An application can have at most {most} witnesses.")
+    phone, nin = normalise_phone(data["phone"]), (data.get("nin") or "").strip().upper()
+    pr = getattr(user, "profile", None)
+    if (pr and pr.phone and normalise_phone(pr.phone) == phone) or (pr and pr.nin and nin and pr.nin.upper() == nin):
+        raise ValidationError("You cannot be a witness to your own loan.")
+    if app.guarantor_phone and normalise_phone(app.guarantor_phone) == phone:
+        raise ValidationError("A witness cannot also be the guarantor.")
+    if app.witnesses.filter(phone=phone).exists():
+        raise ValidationError("This witness has already been added.")
+    w = Witness.objects.create(application=app, full_name=data["full_name"].strip(), phone=phone, nin=nin,
+        relationship=data["relationship"], address=(data.get("address") or "").strip())
+    audit(user, "Witness added", app, f"{w.full_name} ({w.relationship})")
+    return w
+
+@transaction.atomic
+def remove_witness(user, witness):
+    app = LoanApplication.objects.select_for_update().get(pk=witness.application_id)  # never trust a cached copy of the status
+    _own_editable_application(app, user, "Witnesses")
+    audit(user, "Witness removed", app, f"{witness.full_name} ({witness.relationship})")
+    witness.delete()
+
+@transaction.atomic
+def set_disbursement_account(app, user, account):
+    app = LoanApplication.objects.select_for_update().get(pk=app.pk)
+    _own_editable_application(app, user, "The payout account")
+    if account.user_id != user.id or not account.is_active:
+        raise ValidationError("Choose one of your own active bank accounts.")
+    app.disbursement_account = account; app.save(update_fields=["disbursement_account"])
+    audit(user, "Payout account chosen", app, f"{account.bank_name} {account.masked}")
 
 # ---- documents ---------------------------------------------------------------------------------
 def latest_documents(app):
@@ -113,14 +255,12 @@ def transition(app, to, user, note="", assessment=None):
     if role == R.CUSTOMER and app.customer_id != user.id:
         raise PermissionDenied("Not your application.")
     if to == S.SUBMITTED:
-        p = app.loan_product
-        if not (p.min_amount <= app.amount_requested <= p.max_amount) or not (1 <= app.repayment_period <= p.max_period_months):
-            raise ValidationError("Amount or repayment period outside product limits.")
-        pr = getattr(app.customer, "profile", None)
-        if not (pr and pr.nin and pr.phone):
-            raise ValidationError("Complete your profile (NIN and phone) before submitting.")
+        problems = submission_problems(app)
+        if problems:
+            raise ValidationError(problems)
+        app.disbursement_account = effective_account(app)  # explicit choice, else the customer's primary account
         app.submitted_at = timezone.now()
-        app.interest_rate = p.interest_rate  # freeze the rate this customer applied under
+        app.interest_rate = app.loan_product.interest_rate  # freeze the rate this customer applied under
     if to == S.CREDIT_ASSESSMENT:
         problems = document_problems(app)
         if problems:
@@ -132,9 +272,16 @@ def transition(app, to, user, note="", assessment=None):
         cleaned = clean_assessment(assessment)
     if to in (S.APPROVED, S.REJECTED, S.INFORMATION_REQUIRED) and not note:
         raise ValidationError("A reason is required.")
-    if to == S.DISBURSED and not note:
-        raise ValidationError("A disbursement reference is required.")
+    payout = None
+    if to == S.DISBURSED:
+        if not note:
+            raise ValidationError("A disbursement reference is required.")
+        payout = effective_account(app)  # loans approved before accounts existed fall back to the customer's primary account
+        if payout is None:
+            raise ValidationError("The customer has no active bank account to pay the loan into.")
+        app.disbursement_account = payout
     audit_note = _override_note(app, to, note) if to in (S.APPROVED, S.REJECTED) else note
+    if payout: audit_note = f"{note} (paid into {payout.bank_name} {payout.masked})"
     now = timezone.now()
     if cleaned:  # created inside the transaction: it only exists if the whole transition succeeds
         Assessment.objects.create(application=app, assessor=user, **cleaned)

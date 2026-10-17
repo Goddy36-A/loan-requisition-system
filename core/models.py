@@ -21,7 +21,7 @@ NON_NEGATIVE = [MinValueValidator(0)]
 
 class Branch(models.Model):
     name = models.CharField(max_length=100, unique=True)
-    def __str__(self): return self.name + " (demo)"
+    def __str__(self): return self.name
 
 class Profile(models.Model):
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="profile")
@@ -58,6 +58,8 @@ class LoanApplication(models.Model):
         help_text="Annual rate frozen from the product at submission, so later product edits do not change this loan")
     guarantor_name = models.CharField(max_length=100, blank=True, default="")
     guarantor_phone = models.CharField(max_length=30, blank=True, default="")
+    disbursement_account = models.ForeignKey("BankAccount", null=True, blank=True, on_delete=models.PROTECT, related_name="loans",
+        help_text="Bank account the loan is paid into")
     status = models.CharField(max_length=25, choices=Status.choices, default=Status.DRAFT, db_index=True)
     decision_reason = models.TextField(blank=True)
     decided_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
@@ -170,3 +172,46 @@ class SmsLog(models.Model):  # simulated SMS: nothing is actually sent
     recipient = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="sms_log")
     phone = models.CharField(max_length=30, blank=True); text = models.CharField(max_length=300)
     created_at = models.DateTimeField(auto_now_add=True)
+
+
+KIN_RELATIONSHIPS = [(x, x) for x in ("Spouse", "Parent", "Child", "Sibling", "Relative", "Friend", "Other")]
+WITNESS_RELATIONSHIPS = [(x, x) for x in ("Friend", "Colleague", "Relative", "Neighbour", "Employer", "Other")]
+
+class BankAccount(models.Model):
+    """A customer's bank account. 'Removing' one archives it (is_active=False) so loan history keeps pointing at it."""
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="bank_accounts")
+    bank_name = models.CharField(max_length=100)
+    account_name = models.CharField(max_length=120)
+    account_number = models.CharField(max_length=20)
+    branch_name = models.CharField(max_length=100, blank=True, default="")
+    is_primary = models.BooleanField(default=False)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    class Meta: ordering = ["-is_primary", "created_at", "id"]
+
+    @property
+    def masked(self):
+        return "\u2022\u2022\u2022\u2022 " + self.account_number[-4:]
+    def __str__(self): return f"{self.bank_name} {self.masked}"
+
+class NextOfKin(models.Model):
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="next_of_kin")
+    full_name = models.CharField(max_length=120)
+    relationship = models.CharField(max_length=20, choices=KIN_RELATIONSHIPS)
+    phone = models.CharField(max_length=30)
+    address = models.CharField(max_length=200, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    class Meta: ordering = ["created_at", "id"]
+    def __str__(self): return f"{self.full_name} ({self.relationship})"
+
+class Witness(models.Model):
+    """Someone who witnesses one specific loan application (not the applicant, not the guarantor)."""
+    application = models.ForeignKey(LoanApplication, on_delete=models.CASCADE, related_name="witnesses")
+    full_name = models.CharField(max_length=120)
+    phone = models.CharField(max_length=30)
+    nin = models.CharField(max_length=14, blank=True, default="", help_text="National ID number (optional)")
+    relationship = models.CharField(max_length=20, choices=WITNESS_RELATIONSHIPS)
+    address = models.CharField(max_length=200, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    class Meta: ordering = ["created_at", "id"]
+    def __str__(self): return f"{self.full_name} ({self.relationship})"

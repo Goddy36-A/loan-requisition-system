@@ -37,3 +37,21 @@ last cent is paid). The repayment schedule is created at disbursement, so due da
 
 After pulling this change run `python manage.py migrate`. Loans approved before this change stay `APPROVED` until a loan officer
 disburses them; their schedule is rebuilt from the disbursement date.
+
+## Accounts, next of kin and witnesses
+
+Customers manage their details under **My account** (`/account/`): phone and National ID, bank accounts, next of kin and password.
+
+- **Bank account required.** A customer cannot start an application without at least one bank account. Each application names the
+  account the loan is paid into (their primary account if they do not choose). Account numbers are shown masked to the customer
+  and in full only to staff. Removing an account archives it, and is refused while a loan using it is in progress or being repaid.
+- **Next of kin** (up to 5) belong to the customer's account. At least one is needed to submit, and the last one cannot be
+  removed while a loan is in progress.
+- **Witnesses** belong to one application. At least `MIN_WITNESSES` (default 1, at most `MAX_WITNESSES`, default 3) are needed to
+  submit. A witness cannot be the applicant or the guarantor, and the same person cannot be added twice. Witnesses can be changed
+  while the application is a draft or waiting for more information.
+- Phone numbers are cleaned up and stored as `+256...`; account numbers must be 6 to 20 digits; NINs must be unique per account.
+- Disbursement records which account the money went to in the audit trail; it is refused if the customer has no active account.
+
+Existing customers keep working: after `python manage.py migrate` they simply need to add a bank account and a next of kin before
+their next submission. Applications already submitted are not affected. The sample customer (`customer1`) comes with both.

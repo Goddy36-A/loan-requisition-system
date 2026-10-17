@@ -1,4 +1,5 @@
-{% extends "core/base.html" %}{% block content %}<h1>Research questionnaire</h1><p>1 = Strongly Disagree &hellip; 5 = Strongly Agree</p>
-<form method="post">{% csrf_token %}{% for q in questions %}<fieldset class="mb-3"><legend class="h6">{{ q.category }}: {{ q.text }}</legend>
-{% for i in "12345" %}<label class="me-3"><input type="radio" name="q{{ q.pk }}" value="{{ i }}"> {{ i }}</label>{% endfor %}</fieldset>{% endfor %}
-<button class="btn btn-primary">Submit</button></form>{% endblock %}
+{% extends "core/base.html" %}{% block title %}Questionnaire{% endblock %}{% block content %}
+<h1>Research questionnaire</h1><p class="text-muted">Tell us about your experience. 1 = Strongly Disagree &hellip; 5 = Strongly Agree</p>
+<form method="post">{% csrf_token %}{% for q in questions %}<div class="card mb-3"><div class="card-body"><fieldset><legend class="h6"><span class="text-muted">{{ q.category }}</span><br>{{ q.text }}</legend>
+ <div class="d-flex flex-wrap gap-3">{% for i in "12345" %}<div class="form-check"><input class="form-check-input" type="radio" name="q{{ q.pk }}" id="q{{ q.pk }}_{{ i }}" value="{{ i }}"><label class="form-check-label" for="q{{ q.pk }}_{{ i }}">{{ i }}</label></div>{% endfor %}</div></fieldset></div></div>{% endfor %}
+<button class="btn btn-primary">Submit answers</button></form>{% endblock %}

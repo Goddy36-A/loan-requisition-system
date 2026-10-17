@@ -1,6 +1,34 @@
-{% extends "core/base.html" %}{% block content %}<h1>Dashboard <small class="text-muted">{{ role }}</small></h1>
-{% if counts %}<p>{% for s, n in counts.items %}{% if n %}<span class="badge bg-secondary me-1">{{ s }}: {{ n }}</span>{% endif %}{% endfor %}</p>{% endif %}
-{% if notes %}<h2 class="h5">Unread notifications</h2><ul>{% for n in notes %}<li><strong>{{ n.title }}</strong> &ndash; {{ n.message }}</li>{% endfor %}</ul>{% endif %}
-<table class="table"><caption>Applications</caption><tr><th>No.</th><th>Product</th><th>Amount</th><th>Status</th></tr>
-{% for a in apps %}<tr><td><a href="{% url 'detail' a.pk %}">{{ a.application_number }}</a></td><td>{{ a.loan_product }}</td><td>{{ a.amount_requested }}</td><td>{{ a.status }}</td></tr>
-{% empty %}<tr><td colspan="4">None.</td></tr>{% endfor %}</table>{% endblock %}
+{% extends "core/base.html" %}{% load ui %}{% block title %}Applications{% endblock %}{% block content %}
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-4">
+ <div><h1 class="mb-0">{% if role == 'CUSTOMER' %}My loans{% else %}Applications{% endif %}</h1>
+  <p class="text-muted mb-0">{% if role == 'CUSTOMER' %}Track your applications and repayments.{% elif role == 'RESEARCH_ANALYST' %}Use Analytics and Survey from the menu.{% else %}Work waiting for you.{% endif %}</p></div>
+ {% if role == 'CUSTOMER' %}<a class="btn btn-primary" href="{% url 'products' %}">Apply for a loan</a>{% endif %}
+</div>
+
+{% if readiness %}<div class="alert alert-warning" role="alert"><strong>Finish setting up your account to apply:</strong>
+ <ul class="mb-2 mt-1">{% for r in readiness %}<li>{{ r }}</li>{% endfor %}</ul><a class="btn btn-sm btn-primary" href="{% url 'account' %}">Go to My account</a></div>{% endif %}
+
+{% if stats %}
+<div class="row g-3 mb-4">
+ <div class="col-6 col-lg-3"><div class="card stat accent h-100"><div class="k">Outstanding balance</div><div class="v">{{ outstanding|money }}</div><div class="s">UGX across active loans</div></div></div>
+ <div class="col-6 col-lg-3"><div class="card stat h-100"><div class="k">In progress</div><div class="v">{{ stats.in_progress }}</div><div class="s">being reviewed</div></div></div>
+ <div class="col-6 col-lg-3"><div class="card stat h-100"><div class="k">Approved / active</div><div class="v">{{ stats.active }}</div><div class="s">loans</div></div></div>
+ <div class="col-6 col-lg-3"><div class="card stat h-100"><div class="k">Drafts</div><div class="v">{{ stats.drafts }}</div><div class="s">not yet submitted</div></div></div>
+</div>
+{% elif queue_counts %}
+<div class="row g-3 mb-4">{% for s, n in queue_counts %}<div class="col-6 col-lg-3"><div class="card stat h-100"><div class="k">{{ s|status_label }}</div><div class="v">{{ n }}</div><div class="s">in your queue</div></div></div>{% endfor %}</div>
+{% endif %}
+
+{% if notes %}<div class="card mb-4"><div class="card-header">Unread notifications</div><ul class="list-group list-group-flush">
+ {% for n in notes %}<li class="list-group-item"><strong>{{ n.title }}</strong> <span class="text-muted">&ndash; {{ n.message }}</span></li>{% endfor %}</ul></div>{% endif %}
+
+<div class="card"><div class="card-header">{% if role == 'CUSTOMER' %}Your applications{% else %}Queue{% endif %}</div>
+{% if apps %}<div class="table-responsive"><table class="table table-modern"><caption class="visually-hidden">Loan applications</caption>
+ <thead><tr><th>Application</th>{% if role != 'CUSTOMER' %}<th>Customer</th>{% endif %}<th>Product</th><th class="num">Amount (UGX)</th><th>Status</th><th>Created</th></tr></thead><tbody>
+ {% for a in apps %}<tr><td><a class="fw-semibold text-decoration-none" href="{% url 'detail' a.pk %}">{{ a.application_number }}</a></td>
+  {% if role != 'CUSTOMER' %}<td>{{ a.customer.username }}</td>{% endif %}<td>{{ a.loan_product.name }}</td><td class="num">{{ a.amount_requested|money }}</td>
+  <td><span class="pill {{ a.status|status_class }}">{{ a.status|status_label }}</span></td><td class="text-muted">{{ a.created_at|date:"d M Y" }}</td></tr>{% endfor %}
+ </tbody></table></div>
+{% else %}<div class="empty"><p class="mb-2">{% if role == 'CUSTOMER' %}You have no applications yet.{% else %}Nothing in your queue right now.{% endif %}</p>
+ {% if role == 'CUSTOMER' %}<a class="btn btn-primary btn-sm" href="{% url 'products' %}">Browse loan products</a>{% endif %}</div>{% endif %}
+</div>{% endblock %}

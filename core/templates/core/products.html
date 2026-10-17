@@ -1,4 +1,9 @@
-{% extends "core/base.html" %}{% block content %}<h1>Loan products <small class="text-muted">(fictional)</small></h1>
-{% for p in products %}<div class="card mb-2"><div class="card-body"><h2 class="h5">{{ p.name }}</h2>
-<p>{{ p.min_amount }} &ndash; {{ p.max_amount }} UGX, {{ p.interest_rate }}%, up to {{ p.max_period_months }} months</p>
-<a class="btn btn-primary" href="{% url 'apply' p.pk %}">Apply</a></div></div>{% endfor %}{% endblock %}
+{% extends "core/base.html" %}{% load ui %}{% block title %}Loan products{% endblock %}{% block content %}
+<h1>Loan products</h1><p class="text-muted">Choose the loan that fits your needs.</p>
+{% if readiness and not can_apply %}<div class="alert alert-warning" role="alert">Add a bank account to apply for a loan, so we know where to send the money. <a class="alert-link" href="{% url 'account' %}">Go to My account</a></div>{% endif %}
+<div class="row g-3">{% for p in products %}<div class="col-md-6 col-xl-4"><div class="card h-100"><div class="card-body d-flex flex-column">
+ <div class="d-flex justify-content-between align-items-start mb-2"><h2 class="h5 mb-0">{{ p.name }}</h2><span class="pill st-ok">{{ p.interest_rate }}% p.a.</span></div>
+ <p class="text-muted">{{ p.description }}</p>
+ <dl class="kv mb-3"><dt>Amount</dt><dd class="money">{{ p.min_amount|money }} &ndash; {{ p.max_amount|money }} UGX</dd><dt>Repay over</dt><dd>up to {{ p.max_period_months }} months</dd>{% if p.required_documents %}<dt>Documents</dt><dd>{{ p.required_documents }}</dd>{% endif %}</dl>
+ <div class="mt-auto">{% if can_apply is None or can_apply %}<a class="btn btn-primary w-100" href="{% url 'apply' p.pk %}">Apply</a>{% else %}<a class="btn btn-outline-primary w-100" href="{% url 'account' %}">Add a bank account first</a>{% endif %}</div>
+</div></div></div>{% empty %}<p class="empty">No loan products are available right now.</p>{% endfor %}</div>{% endblock %}

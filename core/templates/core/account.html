@@ -1,0 +1,39 @@
+{% extends "core/base.html" %}{% load ui %}{% block title %}My account{% endblock %}{% block content %}
+<h1>My account</h1><p class="text-muted">Signed in as <strong>{{ user.username }}</strong>.</p>
+<div class="row g-4">
+ <div class="col-lg-5">
+  {% if is_customer %}<div class="card mb-4"><div class="card-header">Ready to apply?</div><div class="card-body">
+   <ul class="checklist">{% for label, done, msg in checklist %}<li><span class="tick {% if done %}ok{% else %}no{% endif %}" aria-hidden="true">{% if done %}&#10003;{% else %}!{% endif %}</span><span>{{ label }}{% if not done %} <span class="text-muted">&ndash; {{ msg }}</span>{% endif %}</span></li>{% endfor %}</ul>
+   <p class="small text-muted mb-0 mt-2">Witnesses are added on each loan application.</p></div></div>{% endif %}
+  <div class="card mb-4"><div class="card-header">Personal details</div><div class="card-body"><form method="post" action="{% url 'account' %}">{% csrf_token %}
+   {% for field in profile_form %}{% include "core/_field.html" %}{% endfor %}<button class="btn btn-primary">Save details</button></form></div></div>
+  <div class="card"><div class="card-header">Security</div><div class="card-body"><p class="text-muted">Use a password you do not use anywhere else.</p><a class="btn btn-outline-primary" href="{% url 'password_change' %}">Change password</a></div></div>
+ </div>
+ {% if is_customer %}
+ <div class="col-lg-7">
+  <div class="card mb-4"><div class="card-header d-flex justify-content-between"><span>Bank accounts</span><span class="text-muted fw-normal small">{{ accounts|length }} of {{ max_accounts }}</span></div><div class="card-body">
+   <p class="text-muted small">Your loan is paid into one of these accounts.</p>
+   {% for a in accounts %}<div class="account-chip mb-2"><div><strong>{{ a.bank_name }}</strong> {% if a.is_primary %}<span class="pill st-ok">Primary</span>{% endif %}<br><span class="text-muted">{{ a.account_name }} &middot; <span class="money">{{ a.masked }}</span>{% if a.branch_name %} &middot; {{ a.branch_name }}{% endif %}</span></div>
+    <div class="d-flex gap-2">{% if not a.is_primary %}<form method="post" action="{% url 'bank_primary' a.pk %}">{% csrf_token %}<button class="btn btn-sm btn-outline-primary">Make primary</button></form>{% endif %}
+    <form method="post" action="{% url 'bank_remove' a.pk %}">{% csrf_token %}<button class="btn btn-sm btn-outline-danger">Remove</button></form></div></div>
+   {% empty %}<p class="empty py-3">No bank account yet. Add one below to be able to apply.</p>{% endfor %}
+   {% if accounts|length < max_accounts %}<hr><p class="section-title">Add a bank account</p>
+   <form method="post" action="{% url 'bank_add' %}">{% csrf_token %}{% if bank_form.non_field_errors %}<div class="alert alert-danger py-2" role="alert">{{ bank_form.non_field_errors }}</div>{% endif %}
+    <datalist id="bank-names">{% for b in bank_names %}<option value="{{ b }}">{% endfor %}</datalist>
+    <div class="row"><div class="col-md-6">{% include "core/_field.html" with field=bank_form.bank_name %}</div><div class="col-md-6">{% include "core/_field.html" with field=bank_form.account_number %}</div>
+     <div class="col-md-6">{% include "core/_field.html" with field=bank_form.account_name %}</div><div class="col-md-6">{% include "core/_field.html" with field=bank_form.branch_name %}</div></div>
+    <button class="btn btn-primary">Add bank account</button></form>{% endif %}
+  </div></div>
+  <div class="card"><div class="card-header d-flex justify-content-between"><span>Next of kin</span><span class="text-muted fw-normal small">{{ kin|length }} of {{ max_kin }}</span></div><div class="card-body">
+   <p class="text-muted small">Someone we can contact about your loan if we cannot reach you.</p>
+   {% for k in kin %}<div class="account-chip mb-2"><div><strong>{{ k.full_name }}</strong> <span class="pill st-draft">{{ k.relationship }}</span><br><span class="text-muted">{{ k.phone }}{% if k.address %} &middot; {{ k.address }}{% endif %}</span></div>
+    <form method="post" action="{% url 'kin_remove' k.pk %}">{% csrf_token %}<button class="btn btn-sm btn-outline-danger">Remove</button></form></div>
+   {% empty %}<p class="empty py-3">No next of kin yet. Add at least one below.</p>{% endfor %}
+   {% if kin|length < max_kin %}<hr><p class="section-title">Add next of kin</p>
+   <form method="post" action="{% url 'kin_add' %}">{% csrf_token %}<div class="row">
+    <div class="col-md-6">{% include "core/_field.html" with field=kin_form.full_name %}</div><div class="col-md-6">{% include "core/_field.html" with field=kin_form.relationship %}</div>
+    <div class="col-md-6">{% include "core/_field.html" with field=kin_form.phone %}</div><div class="col-md-6">{% include "core/_field.html" with field=kin_form.address %}</div></div>
+    <button class="btn btn-primary">Add next of kin</button></form>{% endif %}
+  </div></div>
+ </div>{% endif %}
+</div>{% endblock %}

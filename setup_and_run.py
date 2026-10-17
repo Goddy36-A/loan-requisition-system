@@ -69,7 +69,7 @@ def main():
     run(VPY, "manage.py", "migrate")
     if not a.no_seed: run(VPY, "manage.py", "seed_data")
     run(VPY, "manage.py", "check")
-    print("\nOpen http://127.0.0.1:8000/  (admin: /admin/)\nLOCAL DEVELOPMENT / RESEARCH ONLY accounts:\n"
+    print("\nOpen http://127.0.0.1:8000/  (admin: /admin/)\nSign-in accounts:\n"
           "admin/Admin@12345  customer1/Customer@12345  loanofficer/LoanOfficer@12345\n"
           "creditofficer/CreditOfficer@12345  manager/Manager@12345  researcher/Researcher@12345\n")
     run(VPY, "manage.py", "runserver", "127.0.0.1:8000")
