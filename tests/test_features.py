@@ -24,7 +24,7 @@ class FeatureTests(TestCase):
         d = Document.objects.get(); self.assertEqual(self.client.get(f"/documents/{d.pk}/").status_code, 200)
         o = User.objects.create_user("c2", password="x"); Profile.objects.create(user=o); self.client.force_login(o)
         self.assertEqual(self.client.get(f"/documents/{d.pk}/").status_code, 403)
-    def test_approval_creates_schedule_and_sms(self):
+    def test_submission_sends_sms(self):
         services.transition(self.app, Status.SUBMITTED, self.c)
         self.assertEqual(SmsLog.objects.filter(recipient=self.c).count(), 1)
     def test_csv_requires_research_role(self):
