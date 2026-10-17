@@ -1,0 +1,5 @@
+{% extends "core/base.html" %}{% block content %}<h1>Overdue installments</h1>
+<p>{{ rows|length }} installment{{ rows|length|pluralize }} on {{ loans }} loan{{ loans|pluralize }} &middot; Total owed: <strong>{{ total }}</strong> UGX (of which late fees {{ fees }} UGX)</p>
+<table class="table table-sm"><caption>Overdue installments</caption><tr><th>Application</th><th>Customer</th><th>Installment</th><th>Due</th><th>Days late</th><th>Owed (UGX)</th><th>Late fee unpaid</th></tr>
+{% for r in rows %}<tr><td><a href="{% url 'detail' r.application_id %}">{{ r.application.application_number }}</a></td><td>{{ r.application.customer.username }}</td><td>{{ r.number }}</td><td>{{ r.due_date }}</td><td>{{ r.late_days }}</td><td>{{ r.outstanding }}</td><td>{{ r.fee_due }}</td></tr>
+{% empty %}<tr><td colspan="7">Nothing overdue.</td></tr>{% endfor %}</table>{% endblock %}

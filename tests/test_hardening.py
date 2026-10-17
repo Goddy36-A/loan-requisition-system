@@ -182,6 +182,8 @@ class MoneyTests(Base):
 
     def test_approval_creates_exact_schedule_with_calendar_dates(self):
         app = self.app(amt=1000000, per=7); self.to_manager_review(app); services.transition(app, Status.APPROVED, self.mg, "ok")
+        self.assertEqual(app.schedule.count(), 0)  # the schedule starts at disbursement, not approval
+        services.transition(app, Status.DISBURSED, self.lo, "TXN-1")
         rows = list(app.schedule.all()); self.assertEqual(len(rows), 7)
         self.assertEqual(sum(r.principal for r in rows), Decimal("1000000.00"))   # principal repaid exactly
         self.assertEqual(rows[-1].balance, Decimal("0.00"))

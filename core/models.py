@@ -2,6 +2,7 @@ from decimal import Decimal
 from django.conf import settings
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
+from django.utils import timezone
 
 class Role(models.TextChoices):
     CUSTOMER = "CUSTOMER"; LOAN_OFFICER = "LOAN_OFFICER"; CREDIT_OFFICER = "CREDIT_OFFICER"
@@ -11,7 +12,7 @@ class Status(models.TextChoices):
     DRAFT = "DRAFT"; SUBMITTED = "SUBMITTED"; DOCUMENT_REVIEW = "DOCUMENT_REVIEW"
     INFORMATION_REQUIRED = "INFORMATION_REQUIRED"; CREDIT_ASSESSMENT = "CREDIT_ASSESSMENT"
     MANAGER_REVIEW = "MANAGER_REVIEW"; APPROVED = "APPROVED"; REJECTED = "REJECTED"
-    WITHDRAWN = "WITHDRAWN"; COMPLETED = "COMPLETED"
+    WITHDRAWN = "WITHDRAWN"; DISBURSED = "DISBURSED"; COMPLETED = "COMPLETED"
 
 RISK_LEVELS = [(x, x) for x in ("LOW", "MEDIUM", "HIGH")]
 RECOMMENDATIONS = [(x, x) for x in ("RECOMMEND_APPROVAL", "RECOMMEND_REJECTION", "REQUIRE_MORE_INFORMATION")]
@@ -62,6 +63,7 @@ class LoanApplication(models.Model):
     decided_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
     submitted_at = models.DateTimeField(null=True, blank=True)
     approved_at = models.DateTimeField(null=True, blank=True)
+    disbursed_at = models.DateTimeField(null=True, blank=True)
     rejected_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -125,8 +127,44 @@ class RepaymentInstallment(models.Model):
     principal = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     interest = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     balance = models.DecimalField(max_digits=14, decimal_places=2, default=0, help_text="Principal outstanding after this installment")
-    paid_at = models.DateTimeField(null=True, blank=True)
+    paid_at = models.DateTimeField(null=True, blank=True, help_text="Set when the installment and any late fee are fully paid")
+    paid_amount = models.DecimalField(max_digits=14, decimal_places=2, default=0, help_text="Paid towards the installment itself")
+    late_fee = models.DecimalField(max_digits=14, decimal_places=2, default=0, help_text="Penalty charged once when overdue past the grace period")
+    fee_paid = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    fee_assessed_on = models.DateField(null=True, blank=True)
+    reminder_sent_on = models.DateField(null=True, blank=True)
     class Meta: ordering = ["number"]
+
+    @property
+    def amount_due(self): return self.amount - self.paid_amount
+    @property
+    def fee_due(self): return self.late_fee - self.fee_paid
+    @property
+    def outstanding(self): return self.amount_due + self.fee_due
+
+    def state(self, today=None):
+        """PAID, OVERDUE (past due date and unpaid), PARTIAL (part paid, not yet due) or DUE. Computed, never stored."""
+        today = today or timezone.localdate()
+        if self.outstanding <= 0: return "PAID"
+        if self.due_date < today: return "OVERDUE"
+        return "PARTIAL" if self.paid_amount > 0 else "DUE"
+
+    def days_late(self, today=None):
+        today = today or timezone.localdate()
+        return max(0, (today - self.due_date).days) if self.outstanding > 0 else 0
+
+class Payment(models.Model):
+    """A repayment received against a disbursed loan. Allocation to installments is done in services.record_payment."""
+    METHODS = [("CASH", "Cash"), ("MOBILE_MONEY", "Mobile money (simulated)"), ("BANK", "Bank transfer")]
+    application = models.ForeignKey(LoanApplication, on_delete=models.CASCADE, related_name="payments")
+    amount = models.DecimalField(max_digits=14, decimal_places=2, validators=[MinValueValidator(Decimal("0.01"))])
+    method = models.CharField(max_length=20, choices=METHODS)
+    reference = models.CharField(max_length=60, blank=True, default="")
+    paid_on = models.DateField()
+    recorded_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL, related_name="+")
+    created_at = models.DateTimeField(auto_now_add=True)
+    class Meta: ordering = ["-paid_on", "-id"]
+    def __str__(self): return f"{self.application_id} {self.amount} on {self.paid_on}"
 
 class SmsLog(models.Model):  # simulated SMS: nothing is actually sent
     recipient = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="sms_log")

@@ -5,7 +5,8 @@ from django.contrib.auth import login
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.forms import UserCreationForm
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.db.models import Avg, F
+from django.db.models import Avg, DecimalField, ExpressionWrapper, F, Q, Sum
+from django.utils import timezone
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 from . import services
@@ -70,8 +71,16 @@ def detail(request, pk):
     trail = app.auditlog_set.select_related("user") if role != Role.CUSTOMER else []
     latest_ids = {d.pk for d in services.latest_documents(app).values()}
     show_checklist = app.status in (Status.DRAFT, Status.INFORMATION_REQUIRED, Status.DOCUMENT_REVIEW)
+    services.assess_late_fees(app)  # no-op unless DISBURSED; keeps fees current without needing a scheduler
+    today = timezone.localdate()
+    sched = list(app.schedule.all())
+    for i in sched: i.state_label, i.late_days = i.state(today), i.days_late(today)
+    pct, grace = services.late_fee_policy()
     return render(request, "core/detail.html", {"app": app, "role": role, "trail": trail, "aff": services.affordability(app), "docs": app.documents.all(),
-        "sched": app.schedule.all(), "doc_types": DOC_TYPES, "latest_ids": latest_ids,
+        "sched": sched, "doc_types": DOC_TYPES, "latest_ids": latest_ids,
+        "summary": services.repayment_summary(app, today) if sched else None, "payments": app.payments.all(),
+        "can_record_payment": role == Role.LOAN_OFFICER and app.status == Status.DISBURSED,
+        "payment_methods": Payment.METHODS, "fee_percent": pct, "grace_days": grace,
         "can_review": role == Role.LOAN_OFFICER and app.status == Status.DOCUMENT_REVIEW,
         "can_upload": role == Role.CUSTOMER and app.status in (Status.DRAFT, Status.INFORMATION_REQUIRED),
         "doc_problems": services.document_problems(app) if show_checklist else [],
@@ -91,6 +100,40 @@ def do_transition(request, pk):
         services.transition(app, to, request.user, request.POST.get("note", "").strip(), assessment=assessment)
     except ValidationError as e: messages.error(request, "; ".join(e.messages))
     return redirect("detail", pk)
+
+class PaymentForm(forms.Form):
+    amount = forms.DecimalField(min_value=0.01, max_digits=14, decimal_places=2)
+    method = forms.ChoiceField(choices=Payment.METHODS)
+    reference = forms.CharField(max_length=60, required=False)
+    paid_on = forms.DateField(required=False)
+
+@login_required
+@require_POST
+def record_payment(request, pk):
+    app, role = _visible(request.user, pk)
+    if role != Role.LOAN_OFFICER: raise PermissionDenied
+    form = PaymentForm(request.POST)
+    if not form.is_valid():
+        messages.error(request, "; ".join(f"{k}: {' '.join(v)}" for k, v in form.errors.items()))
+        return redirect("detail", pk)
+    d = form.cleaned_data
+    try:
+        services.record_payment(app, d["amount"], d["method"], request.user, d["reference"], d["paid_on"])
+        messages.success(request, "Payment recorded.")
+    except ValidationError as e: messages.error(request, "; ".join(e.messages))
+    return redirect("detail", pk)
+
+@login_required
+def overdue(request):
+    if services.role_of(request.user) not in (Role.LOAN_OFFICER, Role.BRANCH_MANAGER, Role.SYSTEM_ADMIN): raise PermissionDenied
+    services.assess_all_late_fees()
+    today = timezone.localdate()
+    rows = list(RepaymentInstallment.objects.filter(application__status=Status.DISBURSED, due_date__lt=today)
+        .filter(Q(paid_amount__lt=F("amount")) | Q(fee_paid__lt=F("late_fee")))
+        .select_related("application__customer", "application__loan_product").order_by("due_date", "application_id"))
+    for r in rows: r.late_days = r.days_late(today)
+    return render(request, "core/overdue.html", {"rows": rows, "total": sum((r.outstanding for r in rows), 0),
+        "fees": sum((r.fee_due for r in rows), 0), "loans": len({r.application_id for r in rows})})
 
 @login_required
 def survey(request):
@@ -113,6 +156,13 @@ def analytics(request):
     ctx = {"total": apps.count(), "by_status": {s: apps.filter(status=s).count() for s in Status.values},
            "avg_hours": round(statistics.mean(hrs), 2) if hrs else None, "cats": cats,
            "n_responses": SurveyAnswer.objects.values("respondent").distinct().count()}
+    money = lambda e: ExpressionWrapper(e, output_field=DecimalField(max_digits=16, decimal_places=2))
+    live = RepaymentInstallment.objects.filter(application__status=Status.DISBURSED)
+    book = live.aggregate(owed=Sum(money(F("amount") - F("paid_amount") + F("late_fee") - F("fee_paid"))), fees=Sum("late_fee"))
+    late = live.filter(due_date__lt=timezone.localdate()).aggregate(owed=Sum(money(F("amount") - F("paid_amount") + F("late_fee") - F("fee_paid"))))
+    ctx["book"] = {"disbursed": apps.filter(disbursed_at__isnull=False).aggregate(t=Sum("amount_requested"))["t"] or 0,
+        "outstanding": book["owed"] or 0, "late_fees": book["fees"] or 0, "overdue": late["owed"] or 0,
+        "collected": Payment.objects.aggregate(t=Sum("amount"))["t"] or 0}
     return render(request, "core/analytics.html", ctx)
 
 import csv, os, uuid

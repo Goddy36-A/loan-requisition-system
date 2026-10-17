@@ -29,3 +29,9 @@ EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 (BASE_DIR / "logs").mkdir(exist_ok=True)
 LOGGING = {"version": 1, "handlers": {"f": {"class": "logging.FileHandler", "filename": BASE_DIR / "logs" / "application.log"}},
     "root": {"handlers": ["f"], "level": "INFO"}}
+
+# Repayment policy (override in .env). The late fee is charged ONCE per installment, as a percentage of the
+# unpaid installment amount, once it is more than LATE_FEE_GRACE_DAYS past its due date.
+LATE_FEE_PERCENT = os.environ.get("LATE_FEE_PERCENT", "5")
+LATE_FEE_GRACE_DAYS = int(os.environ.get("LATE_FEE_GRACE_DAYS", "3"))
+REMINDER_DAYS_BEFORE = int(os.environ.get("REMINDER_DAYS_BEFORE", "3"))

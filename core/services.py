@@ -1,6 +1,7 @@
 import calendar
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal, ROUND_HALF_UP
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
@@ -25,20 +26,21 @@ TRANSITIONS = {
     (S.CREDIT_ASSESSMENT, S.MANAGER_REVIEW): {R.CREDIT_OFFICER},
     (S.MANAGER_REVIEW, S.APPROVED): {R.BRANCH_MANAGER},
     (S.MANAGER_REVIEW, S.REJECTED): {R.BRANCH_MANAGER},
-    (S.APPROVED, S.COMPLETED): {R.BRANCH_MANAGER, R.SYSTEM_ADMIN},
+    (S.APPROVED, S.DISBURSED): {R.LOAN_OFFICER},  # COMPLETED is automatic: see record_payment
 }
 ALLOWED = {}
 for (_frm, _to) in TRANSITIONS:
     ALLOWED.setdefault(_frm, set()).add(_to)
 
-QUEUES = {R.LOAN_OFFICER: [S.SUBMITTED, S.DOCUMENT_REVIEW, S.INFORMATION_REQUIRED],
-          R.CREDIT_OFFICER: [S.CREDIT_ASSESSMENT], R.BRANCH_MANAGER: [S.MANAGER_REVIEW]}
+QUEUES = {R.LOAN_OFFICER: [S.SUBMITTED, S.DOCUMENT_REVIEW, S.INFORMATION_REQUIRED, S.APPROVED, S.DISBURSED],
+          R.CREDIT_OFFICER: [S.CREDIT_ASSESSMENT], R.BRANCH_MANAGER: [S.MANAGER_REVIEW, S.DISBURSED]}
 # Entering one of these states puts work in front of this staff role.
-QUEUE_ENTRY = {S.SUBMITTED: R.LOAN_OFFICER, S.DOCUMENT_REVIEW: R.LOAN_OFFICER,
+QUEUE_ENTRY = {S.SUBMITTED: R.LOAN_OFFICER, S.DOCUMENT_REVIEW: R.LOAN_OFFICER, S.APPROVED: R.LOAN_OFFICER,
                S.CREDIT_ASSESSMENT: R.CREDIT_OFFICER, S.MANAGER_REVIEW: R.BRANCH_MANAGER}
 NOTIFY = {S.SUBMITTED: "Application submitted", S.INFORMATION_REQUIRED: "Additional information requested",
     S.CREDIT_ASSESSMENT: "Application in credit assessment", S.MANAGER_REVIEW: "Application at manager review",
-    S.APPROVED: "Application approved", S.REJECTED: "Application rejected"}
+    S.APPROVED: "Application approved", S.REJECTED: "Application rejected",
+    S.DISBURSED: "Loan disbursed", S.COMPLETED: "Loan fully repaid"}
 
 def role_of(user):
     p = getattr(user, "profile", None)
@@ -130,6 +132,8 @@ def transition(app, to, user, note="", assessment=None):
         cleaned = clean_assessment(assessment)
     if to in (S.APPROVED, S.REJECTED, S.INFORMATION_REQUIRED) and not note:
         raise ValidationError("A reason is required.")
+    if to == S.DISBURSED and not note:
+        raise ValidationError("A disbursement reference is required.")
     audit_note = _override_note(app, to, note) if to in (S.APPROVED, S.REJECTED) else note
     now = timezone.now()
     if cleaned:  # created inside the transaction: it only exists if the whole transition succeeds
@@ -139,7 +143,7 @@ def transition(app, to, user, note="", assessment=None):
         if app.interest_rate is None:  # applications submitted before rates were frozen
             app.interest_rate = app.loan_product.interest_rate
     if to == S.REJECTED: app.rejected_at = now
-    if to == S.COMPLETED: app.completed_at = now
+    if to == S.DISBURSED: app.disbursed_at = now
     if to in (S.APPROVED, S.REJECTED):
         app.decision_reason, app.decided_by = note, user
     old, app.status = app.status, to
@@ -151,8 +155,8 @@ def transition(app, to, user, note="", assessment=None):
         SmsLog.objects.create(recipient=app.customer, phone=getattr(getattr(app.customer, "profile", None), "phone", ""),
             text=f"[SIMULATED SMS] {app.application_number}: {NOTIFY[to]}")
     _notify_staff(app, to, role)
-    if to == S.APPROVED:
-        make_schedule(app)
+    if to == S.DISBURSED:
+        make_schedule(app)  # due dates run from the day the money is paid out
     return app
 
 # ---- money -------------------------------------------------------------------------------------
@@ -196,8 +200,114 @@ def add_months(d, n):
     return date(y, m, min(d.day, calendar.monthrange(y, m)[1]))
 
 def make_schedule(app):
-    if app.schedule.exists(): return
-    start = timezone.localdate()
+    if app.schedule.exists():
+        if app.payments.exists() or app.schedule.filter(paid_amount__gt=0).exists(): return  # never rewrite a schedule with payments on it
+        app.schedule.all().delete()
+    start = timezone.localdate(app.disbursed_at) if app.disbursed_at else timezone.localdate()
     RepaymentInstallment.objects.bulk_create([RepaymentInstallment(application=app, number=i, due_date=add_months(start, i),
         amount=pay, principal=prin, interest=intr, balance=bal)
         for i, (prin, intr, pay, bal) in enumerate(amortization(app.amount_requested, rate_of(app), app.repayment_period), 1)])
+
+# ---- repayments --------------------------------------------------------------------------------
+PAYMENT_METHODS = {m for m, _ in Payment.METHODS}
+
+def late_fee_policy():
+    return Decimal(str(settings.LATE_FEE_PERCENT)), int(settings.LATE_FEE_GRACE_DAYS)
+
+def outstanding_total(app):
+    """Everything still owed: unpaid installments plus assessed late fees. This is also the early-payoff amount
+    (interest is not recalculated for early settlement)."""
+    return sum((i.outstanding for i in app.schedule.all()), Decimal("0.00"))
+
+def repayment_summary(app, today=None):
+    today = today or timezone.localdate()
+    rows = list(app.schedule.all())
+    unpaid = [i for i in rows if i.outstanding > 0]
+    overdue = [i for i in unpaid if i.due_date < today]
+    return {"paid_total": sum((i.paid_amount + i.fee_paid for i in rows), Decimal("0.00")),
+            "outstanding": sum((i.outstanding for i in rows), Decimal("0.00")),
+            "overdue_amount": sum((i.outstanding for i in overdue), Decimal("0.00")),
+            "overdue_count": len(overdue), "fees_due": sum((i.fee_due for i in rows), Decimal("0.00")),
+            "next_due": unpaid[0] if unpaid else None, "installments_paid": len(rows) - len(unpaid), "installments": len(rows)}
+
+def _message_customer(app, title, message, ntype):
+    Notification.objects.create(recipient=app.customer, title=title, notification_type=ntype, message=message)
+    SmsLog.objects.create(recipient=app.customer, phone=getattr(getattr(app.customer, "profile", None), "phone", ""),
+                          text=f"[SIMULATED SMS] {message}"[:300])
+
+@transaction.atomic
+def assess_late_fees(app, today=None):
+    """Charge the one-off late fee on installments unpaid more than the grace period after their due date.
+    Idempotent: an installment is only ever assessed once. Returns the installments charged."""
+    if app.status != S.DISBURSED: return []
+    pct, grace = late_fee_policy()
+    today, charged = today or timezone.localdate(), []
+    for inst in app.schedule.select_for_update():
+        if inst.fee_assessed_on or inst.amount_due <= 0 or today <= inst.due_date + timedelta(days=grace):
+            continue
+        fee = (inst.amount_due * pct / 100).quantize(CENT, ROUND_HALF_UP)
+        inst.fee_assessed_on = today
+        if fee > 0:
+            inst.late_fee = fee
+            audit(None, "Late fee assessed", app, f"Installment {inst.number} due {inst.due_date}: UGX {fee} ({pct}% of UGX {inst.amount_due} unpaid)")
+            _message_customer(app, "Late payment fee", f"{app.application_number}: installment {inst.number} is overdue. "
+                f"A late fee of UGX {fee} was added.", "LATE_FEE")
+            charged.append(inst)
+        inst.save()
+    return charged
+
+def assess_all_late_fees(today=None):
+    return sum(len(assess_late_fees(a, today)) for a in LoanApplication.objects.filter(status=S.DISBURSED))
+
+@transaction.atomic
+def record_payment(app, amount, method, user, reference="", paid_on=None):
+    """Record money received and allocate it oldest installment first (late fee, then installment).
+    Payments may run ahead of the schedule (early settlement); they may not exceed what is owed.
+    When nothing is left owing the loan completes automatically."""
+    app = LoanApplication.objects.select_for_update().get(pk=app.pk)
+    if role_of(user) != R.LOAN_OFFICER:
+        raise PermissionDenied("Only loan officers record payments.")
+    if app.status != S.DISBURSED:
+        raise ValidationError("Payments can only be recorded on a disbursed loan.")
+    try: amount = Decimal(amount).quantize(CENT, ROUND_HALF_UP)
+    except Exception: raise ValidationError("Enter a valid amount.")
+    if amount <= 0: raise ValidationError("Payment must be greater than zero.")
+    if method not in PAYMENT_METHODS: raise ValidationError("Invalid payment method.")
+    today = timezone.localdate()
+    paid_on = paid_on or today
+    if paid_on > today: raise ValidationError("Payment date cannot be in the future.")
+    if app.disbursed_at and paid_on < timezone.localdate(app.disbursed_at):
+        raise ValidationError("Payment date cannot be before the loan was disbursed.")
+    assess_late_fees(app, paid_on)  # judge lateness as of the payment date, so a backdated on-time payment is not penalised
+    owed = outstanding_total(app)
+    if amount > owed:
+        raise ValidationError(f"Payment of UGX {amount} exceeds the outstanding balance of UGX {owed}.")
+    remaining, now = amount, timezone.now()
+    for inst in app.schedule.select_for_update():
+        if remaining <= 0: break
+        fee = min(remaining, inst.fee_due); inst.fee_paid += fee; remaining -= fee
+        part = min(remaining, inst.amount_due); inst.paid_amount += part; remaining -= part
+        if inst.outstanding <= 0 and not inst.paid_at: inst.paid_at = now
+        inst.save()
+    Payment.objects.create(application=app, amount=amount, method=method, reference=reference.strip()[:60], paid_on=paid_on, recorded_by=user)
+    left = outstanding_total(app)
+    audit(user, "Payment recorded", app, f"UGX {amount} via {method}" + (f" ref {reference.strip()[:60]}" if reference.strip() else "") + f"; outstanding UGX {left}")
+    _message_customer(app, "Payment received", f"{app.application_number}: UGX {amount} received. Outstanding: UGX {left}.", "PAYMENT")
+    if left <= 0:
+        app.status, app.completed_at = S.COMPLETED, now
+        app.save()
+        audit(user, f"{S.DISBURSED} -> {S.COMPLETED}", app, "Loan fully repaid")
+        _message_customer(app, NOTIFY[S.COMPLETED], f"{app.application_number}: {NOTIFY[S.COMPLETED]}. Thank you.", S.COMPLETED)
+    return app
+
+def send_reminders(today=None):
+    """Simulated SMS + notification for installments falling due within REMINDER_DAYS_BEFORE days. Sent once each."""
+    today, sent = today or timezone.localdate(), 0
+    window = today + timedelta(days=int(settings.REMINDER_DAYS_BEFORE))
+    for inst in RepaymentInstallment.objects.filter(application__status=S.DISBURSED, reminder_sent_on__isnull=True,
+                                                    due_date__gte=today, due_date__lte=window).select_related("application__customer", "application__loan_product"):
+        if inst.outstanding <= 0: continue
+        _message_customer(inst.application, "Payment reminder", f"{inst.application.application_number}: UGX {inst.outstanding} "
+            f"is due on {inst.due_date}.", "REMINDER")
+        inst.reminder_sent_on = today; inst.save(update_fields=["reminder_sent_on"]); sent += 1
+    return sent

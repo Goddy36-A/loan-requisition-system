@@ -6,7 +6,7 @@
 <label for="to">Action</label> <select id="to" name="to">{% for n in next %}<option>{{ n }}</option>{% endfor %}</select>
 {% if role == 'CREDIT_OFFICER' %}<label for="risk">Risk</label> <select id="risk" name="risk"><option>LOW</option><option>MEDIUM</option><option>HIGH</option></select>
 <label for="rec">Recommendation</label> <select id="rec" name="recommendation"><option>RECOMMEND_APPROVAL</option><option>RECOMMEND_REJECTION</option><option>REQUIRE_MORE_INFORMATION</option></select><label for="ch">Credit history (simulated)</label> <select id="ch" name="credit_history"><option>GOOD</option><option>FAIR</option><option>POOR</option><option>NONE</option></select>{% endif %}
-<label for="note">Note / reason</label> <input id="note" name="note"> <button class="btn btn-primary">Apply</button></form>{% endif %}
+<label for="note">Note / reason / disbursement reference</label> <input id="note" name="note"> <button class="btn btn-primary">Apply</button></form>{% endif %}
 <h2 class="h5 mt-4">Repayment estimate</h2>
 <p>Monthly installment: <strong>{{ aff.installment }}</strong> UGX &middot; Disposable income: {{ aff.disposable }} UGX &middot;
 Affordability: {% if aff.affordable %}<span class="badge bg-success">Within means</span>{% else %}<span class="badge bg-danger">Stretch</span>{% endif %}
@@ -18,5 +18,18 @@ Affordability: {% if aff.affordable %}<span class="badge bg-success">Within mean
 {% if can_upload %}<form method="post" action="{% url 'upload' app.pk %}" enctype="multipart/form-data">{% csrf_token %}
 <label for="dt">Type</label> <select id="dt" name="doc_type">{% for t in doc_types %}<option>{{ t }}</option>{% endfor %}</select>
 <label for="fl">File (PDF/JPG/PNG, max 5 MB)</label> <input id="fl" type="file" name="file"> <button class="btn btn-secondary">Upload</button></form>{% endif %}
-{% if sched %}<h2 class="h5 mt-4">Repayment schedule</h2><table class="table table-sm"><caption>Schedule</caption><tr><th>#</th><th>Due</th><th>Installment</th><th>Principal</th><th>Interest</th><th>Balance</th></tr>{% for i in sched %}<tr><td>{{ i.number }}</td><td>{{ i.due_date }}</td><td>{{ i.amount }}</td><td>{{ i.principal }}</td><td>{{ i.interest }}</td><td>{{ i.balance }}</td></tr>{% endfor %}</table>{% endif %}
+{% if sched %}<h2 class="h5 mt-4">Repayments</h2>
+{% if summary %}<p>Paid so far: <strong>{{ summary.paid_total }}</strong> UGX &middot; Outstanding (settle in full today): <strong>{{ summary.outstanding }}</strong> UGX &middot; Installments paid: {{ summary.installments_paid }}/{{ summary.installments }}
+{% if summary.next_due %}&middot; Next due: {{ summary.next_due.due_date }} ({{ summary.next_due.outstanding }} UGX){% endif %}
+{% if summary.overdue_count %}<br><span class="badge bg-danger">{{ summary.overdue_count }} overdue: {{ summary.overdue_amount }} UGX</span>{% endif %}</p>{% endif %}
+<p class="small text-muted">Late payment penalty: {{ fee_percent }}% of the unpaid installment, charged once when it is more than {{ grace_days }} days past its due date. Early settlement pays the full outstanding balance; interest is not recalculated.</p>
+<table class="table table-sm"><caption>Schedule</caption><tr><th>#</th><th>Due</th><th>Installment</th><th>Principal</th><th>Interest</th><th>Paid</th><th>Late fee</th><th>Status</th></tr>{% for i in sched %}<tr><td>{{ i.number }}</td><td>{{ i.due_date }}</td><td>{{ i.amount }}</td><td>{{ i.principal }}</td><td>{{ i.interest }}</td><td>{{ i.paid_amount }}</td><td>{{ i.late_fee }}{% if i.fee_due and i.late_fee %} <small class="text-muted">({{ i.fee_due }} unpaid)</small>{% endif %}</td>
+<td>{% if i.state_label == 'PAID' %}<span class="badge bg-success">PAID</span>{% elif i.state_label == 'OVERDUE' %}<span class="badge bg-danger">OVERDUE {{ i.late_days }}d</span>{% elif i.state_label == 'PARTIAL' %}<span class="badge bg-warning text-dark">PARTIAL</span>{% else %}<span class="badge bg-secondary">DUE</span>{% endif %}</td></tr>{% endfor %}</table>
+<h3 class="h6">Payments</h3><ul>{% for p in payments %}<li>{{ p.paid_on }} &ndash; {{ p.amount }} UGX ({{ p.get_method_display }}){% if p.reference %} ref {{ p.reference }}{% endif %}</li>{% empty %}<li>None yet.</li>{% endfor %}</ul>
+{% if can_record_payment %}<form method="post" action="{% url 'record_payment' app.pk %}" class="row g-2 align-items-end">{% csrf_token %}
+<div class="col-auto"><label for="pa">Amount (UGX)</label> <input id="pa" name="amount" type="number" step="0.01" min="0.01" required></div>
+<div class="col-auto"><label for="pm">Method</label> <select id="pm" name="method">{% for v, l in payment_methods %}<option value="{{ v }}">{{ l }}</option>{% endfor %}</select></div>
+<div class="col-auto"><label for="pr">Reference</label> <input id="pr" name="reference" maxlength="60"></div>
+<div class="col-auto"><label for="pd">Date received</label> <input id="pd" name="paid_on" type="date"></div>
+<div class="col-auto"><button class="btn btn-success">Record payment</button></div></form>{% endif %}{% endif %}
 {% if trail %}<h2 class="h5 mt-4">Audit trail</h2><ul>{% for t in trail %}<li>{{ t.timestamp }} {{ t.user }}: {{ t.action }} {{ t.description }}</li>{% endfor %}</ul>{% endif %}{% endblock %}
