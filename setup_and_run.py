@@ -82,7 +82,8 @@ def main():
     run(VPY, "manage.py", "check")
     print("\nOpen http://127.0.0.1:8000/  (admin: /admin/)\nSign-in accounts:\n"
           "admin/Admin@12345  customer1/Customer@12345  loanofficer/LoanOfficer@12345\n"
-          "creditofficer/CreditOfficer@12345  manager/Manager@12345  researcher/Researcher@12345\n")
+          "creditofficer/CreditOfficer@12345  manager/Manager@12345  researcher/Researcher@12345\n"
+          "(They are also listed on the sign-in page. Forgot one? python manage.py seed_data --reset-passwords)\n")
     run(VPY, "manage.py", "runserver", "127.0.0.1:8000")
 
 if __name__ == "__main__":

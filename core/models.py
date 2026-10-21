@@ -215,3 +215,13 @@ class Witness(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     class Meta: ordering = ["created_at", "id"]
     def __str__(self): return f"{self.full_name} ({self.relationship})"
+
+
+class LoginAttempt(models.Model):
+    """Failed sign-in counter used for throttling. One row per key ('user-ip:name|address' or 'user:name')."""
+    key = models.CharField(max_length=220, unique=True)
+    failures = models.PositiveIntegerField(default=0)
+    first_failure_at = models.DateTimeField()
+    locked_until = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    def __str__(self): return self.key

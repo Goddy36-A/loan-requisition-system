@@ -1,0 +1,4 @@
+# Extra packages for hosting (see README: Hosting in the cloud)
+-r requirements.txt
+whitenoise>=6.6,<7
+gunicorn>=22,<24

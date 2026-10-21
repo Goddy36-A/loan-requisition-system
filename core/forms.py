@@ -1,7 +1,7 @@
 from django import forms
 from django.contrib.auth.forms import AuthenticationForm, PasswordChangeForm, UserCreationForm
 from django.core.exceptions import ValidationError
-from . import services, validators
+from . import services, throttle, validators
 from .models import *
 
 
@@ -22,7 +22,24 @@ class StyledFormMixin:
                 w.attrs["class"] = (w.attrs.get("class", "") + " is-invalid").strip()
 
 
-class StyledAuthForm(StyledFormMixin, AuthenticationForm): pass
+class ThrottledLoginMixin:
+    """Locks sign-in after repeated wrong passwords (see core/throttle.py). Used by the site and the admin sign-in forms."""
+    def clean(self):
+        username = (self.data.get(self.add_prefix("username")) or "").strip()
+        ip = throttle.client_ip(self.request)
+        wait = throttle.lock_remaining(username, ip)
+        if wait:
+            minutes = max(1, -(-wait // 60))
+            raise ValidationError(f"Too many failed sign-in attempts. Try again in {minutes} minute{'' if minutes == 1 else 's'}.", code="locked")
+        try:
+            cleaned = super().clean()
+        except ValidationError:
+            throttle.record_failure(username, ip); raise
+        if getattr(self, "user_cache", None): throttle.record_success(username, ip)
+        return cleaned
+
+
+class StyledAuthForm(ThrottledLoginMixin, StyledFormMixin, AuthenticationForm): pass
 class StyledRegisterForm(StyledFormMixin, UserCreationForm): pass
 class StyledPasswordChangeForm(StyledFormMixin, PasswordChangeForm): pass
 

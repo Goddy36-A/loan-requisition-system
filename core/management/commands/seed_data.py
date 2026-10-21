@@ -1,10 +1,11 @@
+import os
+import secrets
+from django.conf import settings
 from django.contrib.auth.models import User
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
 from core.models import *
+from core.sample_accounts import ACCOUNTS, PUBLISHED_PASSWORDS
 
-USERS = [("admin", "Admin@12345", Role.SYSTEM_ADMIN), ("customer1", "Customer@12345", Role.CUSTOMER),
-    ("loanofficer", "LoanOfficer@12345", Role.LOAN_OFFICER), ("creditofficer", "CreditOfficer@12345", Role.CREDIT_OFFICER),
-    ("manager", "Manager@12345", Role.BRANCH_MANAGER), ("researcher", "Researcher@12345", Role.RESEARCH_ANALYST)]
 PRODUCTS = [("Personal Loan", 500000, 20000000, 18, 36), ("Salary Loan", 500000, 30000000, 16, 48),
     ("Business Loan", 1000000, 50000000, 20, 60), ("Education Loan", 500000, 15000000, 14, 48),
     ("Emergency Loan", 100000, 3000000, 22, 12)]
@@ -16,13 +17,34 @@ QUESTIONS = {"System Accessibility": ["It is easy to access the online loan syst
     "Service Delivery Quality": ["I am satisfied with the service received.", "My application was handled in good time."],
     "Accessibility of Loan Services": ["Applying for a loan online is easy.", "I can complete a loan request fully online."]}
 
+
 class Command(BaseCommand):
-    help = "Create the standard users, branches, loan products and survey questions. Safe to run repeatedly."
-    def handle(self, *a, **kw):
-        for name, pw, role in USERS:
+    help = ("Create the standard users, branches, loan products and survey questions. Safe to run repeatedly. On this computer the "
+            "users get the published sample passwords; when hosted they get random passwords (printed once) or SEED_PASSWORD_<USERNAME>.")
+    requires_system_checks = []  # this command is the fix for the hosted-with-sample-passwords check, so it must be able to run
+
+    def add_arguments(self, parser):
+        parser.add_argument("--reset-passwords", action="store_true",
+            help="Set the sample accounts' passwords again (the published ones on this computer, new random ones when hosted).")
+
+    def password_for(self, name):
+        """(password, generated?) for a sample account under the current mode."""
+        if settings.LOCAL_MODE: return PUBLISHED_PASSWORDS[name], False
+        chosen = os.environ.get(f"SEED_PASSWORD_{name.upper()}")
+        if chosen:
+            if chosen == PUBLISHED_PASSWORDS[name]:
+                raise CommandError(f"SEED_PASSWORD_{name.upper()} is the published sample password. Choose a different one.")
+            return chosen, False
+        return secrets.token_urlsafe(12), True
+
+    def handle(self, *a, reset_passwords=False, **kw):
+        issued = []
+        for name, _, role in ACCOUNTS:
             u, created = User.objects.get_or_create(username=name)
-            if created:
+            if created or reset_passwords:
+                pw, generated = self.password_for(name)
                 u.set_password(pw)
+                if generated: issued.append((name, pw))
             if name == "admin": u.is_staff = u.is_superuser = True
             u.save(); Profile.objects.get_or_create(user=u, defaults={"role": role})
             if name == "customer1":  # sample customer, ready to apply straight away
@@ -40,3 +62,8 @@ class Command(BaseCommand):
         for c, qs in QUESTIONS.items():
             for t in qs: SurveyQuestion.objects.get_or_create(category=c, text=t)
         self.stdout.write("Seed complete.")
+        if issued:
+            self.stdout.write("\nNew passwords (shown once, not stored anywhere else; change them after signing in):")
+            for name, pw in issued: self.stdout.write(f"  {name:<14} {pw}")
+        elif reset_passwords and settings.LOCAL_MODE:
+            self.stdout.write("Sample passwords were reset to the published ones.")

@@ -7,4 +7,9 @@
   <button class="btn btn-primary w-100 mt-2">Sign in</button>
  </form>
  <p class="text-center text-muted mt-4 mb-0">New here? <a href="{% url 'register' %}">Create an account</a></p>
-</div></div></div>{% endblock %}
+</div></div>
+{% if sample_accounts %}<div class="card mt-3"><div class="card-body"><p class="section-title">Sign-in accounts on this computer</p>
+ <div class="table-responsive"><table class="table table-sm table-modern mb-2"><caption class="visually-hidden">Sign-in accounts</caption><thead><tr><th>Username</th><th>Password</th><th>Role</th></tr></thead><tbody>
+ {% for name, password, role in sample_accounts %}<tr><td><code>{{ name }}</code></td><td><code>{{ password }}</code></td><td>{{ role }}</td></tr>{% endfor %}</tbody></table></div>
+ <p class="small text-muted mb-0">Shown only while the app runs on this computer. Forgot one? Run <code>python manage.py seed_data --reset-passwords</code>.</p></div></div>{% endif %}
+</div>{% endblock %}
