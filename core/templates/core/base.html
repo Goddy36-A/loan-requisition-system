@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{% block title %}Loan Requisition System{% endblock %}</title>
-<link rel="stylesheet" href="{% static 'core/vendor/bootstrap/bootstrap.min.css' %}">
+{% inline_css 'core/vendor/bootstrap/bootstrap.min.css' %}
 <style>
 :root{--brand:#0e6b5c;--brand-dark:#0a4f44;--brand-soft:#e3f2ef;--ink:#17302c;--muted:#64748b;--bg:#f3f6f5;--card:#fff;--line:#e3e9e7;--accent:#e9a820;
   --radius:14px;--shadow:0 1px 2px rgba(16,40,36,.06),0 8px 22px rgba(16,40,36,.06)}
@@ -108,5 +108,5 @@ img,svg,video{max-width:100%;height:auto}
  {% block content %}{% endblock %}
 </main>
 <footer class="container footer text-center">Independent platform &middot; not affiliated with any bank.</footer>
-<script src="{% static 'core/vendor/bootstrap/bootstrap.bundle.min.js' %}"></script>
+{% inline_js 'core/vendor/bootstrap/bootstrap.bundle.min.js' %}
 </body></html>
