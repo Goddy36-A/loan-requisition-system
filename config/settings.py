@@ -1,8 +1,14 @@
 import importlib.util
+import mimetypes
 import os
 from pathlib import Path
 from django.core.exceptions import ImproperlyConfigured
 BASE_DIR = Path(__file__).resolve().parent.parent
+# On some Windows PCs the registry maps .css/.js to text/plain, so Chrome refuses the stylesheets and scripts (the admin and
+# Bootstrap then show completely unstyled). Pin the correct types so static files always load.
+for _ext, _type in {".css": "text/css", ".js": "text/javascript", ".mjs": "text/javascript", ".svg": "image/svg+xml",
+                    ".woff": "font/woff", ".woff2": "font/woff2", ".json": "application/json"}.items():
+    mimetypes.add_type(_type, _ext, True)
 env = BASE_DIR / ".env"
 if env.exists():
     for line in env.read_text().splitlines():
