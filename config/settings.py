@@ -9,6 +9,16 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 for _ext, _type in {".css": "text/css", ".js": "text/javascript", ".mjs": "text/javascript", ".svg": "image/svg+xml",
                     ".woff": "font/woff", ".woff2": "font/woff2", ".json": "application/json"}.items():
     mimetypes.add_type(_type, _ext, True)
+# add_type() alone can still lose to a bad Windows registry entry, so also make guess_type() trust these extensions first.
+_PINNED = {_e: _t for _e, _t in {".css": "text/css", ".js": "text/javascript", ".mjs": "text/javascript", ".svg": "image/svg+xml",
+           ".woff": "font/woff", ".woff2": "font/woff2", ".json": "application/json"}.items()}
+_orig_guess_type = mimetypes.guess_type
+def _guess_type(url, strict=True):
+    _p = os.fspath(url).lower().split("?", 1)[0]
+    for _e, _t in _PINNED.items():
+        if _p.endswith(_e): return _t, None
+    return _orig_guess_type(url, strict)
+if mimetypes.guess_type is _orig_guess_type: mimetypes.guess_type = _guess_type
 env = BASE_DIR / ".env"
 if env.exists():
     for line in env.read_text().splitlines():
