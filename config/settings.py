@@ -18,7 +18,7 @@ def _guess_type(url, strict=True):
     for _e, _t in _PINNED.items():
         if _p.endswith(_e): return _t, None
     return _orig_guess_type(url, strict)
-if mimetypes.guess_type is _orig_guess_type: mimetypes.guess_type = _guess_type
+if mimetypes.guess_type is not _orig_guess_type: mimetypes.guess_type = _guess_type
 env = BASE_DIR / ".env"
 if env.exists():
     for line in env.read_text().splitlines():
@@ -35,7 +35,7 @@ HOSTED = any(h not in _LOCAL_HOSTS for h in ALLOWED_HOSTS)
 DEBUG = os.environ.get("DJANGO_DEBUG", "0" if HOSTED else "1") == "1"
 if HOSTED and DEBUG:
     raise ImproperlyConfigured("DJANGO_DEBUG=1 is not allowed when DJANGO_ALLOWED_HOSTS lists a public host: debug pages leak "
-                               "settings and code. Set DJANGO_DEBUG=0.")
+        "settings and code. Set DJANGO_DEBUG=0.")
 LOCAL_MODE = DEBUG and not HOSTED
 
 _DEV_KEY = "dev-only-insecure-key-local-research"
@@ -44,7 +44,7 @@ if LOCAL_MODE:
     if SECRET_KEY in ("", "change-me"): SECRET_KEY = _DEV_KEY
 elif SECRET_KEY in ("", "change-me", _DEV_KEY) or len(SECRET_KEY) < 32:
     raise ImproperlyConfigured("DJANGO_SECRET_KEY must be set to a long random value (32+ characters) outside local mode. Generate one "
-                               "with:  python -c \"import secrets; print(secrets.token_urlsafe(50))\"")
+        "with:  python -c \"import secrets; print(secrets.token_urlsafe(50))\"")
 INSTALLED_APPS = ["django.contrib.admin", "django.contrib.auth", "django.contrib.contenttypes",
     "django.contrib.sessions", "django.contrib.messages", "django.contrib.staticfiles", "core"]
 MIDDLEWARE = ["django.middleware.security.SecurityMiddleware", "django.contrib.sessions.middleware.SessionMiddleware",
@@ -67,7 +67,7 @@ BEHIND_PROXY = _flag("DJANGO_BEHIND_PROXY")  # trust X-Forwarded-For (last hop) 
 STATIC_ROOT = BASE_DIR / "staticfiles"  # `python manage.py collectstatic` target when hosting
 
 # Sign-in throttling: after this many wrong attempts for one username from one address (or LOGIN_USER_MAX_FAILURES for the
-# username from anywhere) the sign-in is locked for LOGIN_LOCK_MINUTES. Gentler on this computer, stricter when hosted.
+# username from anywhere) the sign-in is locked for LOGIN_LOCK_MINUTES. Gentler on this computer, stricter from hosted.
 LOGIN_MAX_FAILURES = int(os.environ.get("LOGIN_MAX_FAILURES", "10" if LOCAL_MODE else "5"))
 LOGIN_LOCK_MINUTES = int(os.environ.get("LOGIN_LOCK_MINUTES", "1" if LOCAL_MODE else "15"))
 LOGIN_USER_MAX_FAILURES = int(os.environ.get("LOGIN_USER_MAX_FAILURES", "50" if LOCAL_MODE else "25"))
@@ -80,7 +80,8 @@ TEMPLATES = [{"BACKEND": "django.template.backends.django.DjangoTemplates", "DIR
 WSGI_APPLICATION = "config.wsgi.application"
 DATABASES = {"default": {"ENGINE": "django.db.backends.sqlite3", "NAME": BASE_DIR / "db.sqlite3"}}
 TIME_ZONE = "Africa/Kampala"; USE_TZ = True
-STATIC_URL = "static/"; MEDIA_ROOT = BASE_DIR / "media"
+STATIC_URL = "/static/"
+MEDIA_ROOT = BASE_DIR / "media"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 LOGIN_URL = "login"; LOGIN_REDIRECT_URL = "dashboard"; LOGOUT_REDIRECT_URL = "login"
 EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
@@ -94,7 +95,7 @@ LATE_FEE_PERCENT = os.environ.get("LATE_FEE_PERCENT", "5")
 LATE_FEE_GRACE_DAYS = int(os.environ.get("LATE_FEE_GRACE_DAYS", "3"))
 REMINDER_DAYS_BEFORE = int(os.environ.get("REMINDER_DAYS_BEFORE", "3"))
 
-# Loan applications need this many witnesses (and may have at most MAX_WITNESSES).
+# Loan applications need this many witnesses (each application may have at most MAX_WITNESSES).
 MIN_WITNESSES = int(os.environ.get("MIN_WITNESSES", "1"))
 MAX_WITNESSES = int(os.environ.get("MAX_WITNESSES", "3"))
 
