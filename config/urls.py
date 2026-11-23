@@ -4,16 +4,11 @@ from django.contrib.messages.views import SuccessMessageMixin
 from django.urls import path, reverse_lazy
 from core import views
 from django.conf import settings
-from core import sample_accounts
 from core.forms import StyledAuthForm, StyledPasswordChangeForm
 
 
 class SignIn(av.LoginView):
     authentication_form = StyledAuthForm
-    def get_context_data(self, **kwargs):
-        ctx = super().get_context_data(**kwargs)
-        if settings.LOCAL_MODE: ctx["sample_accounts"] = sample_accounts.existing_accounts()  # never shown when hosted
-        return ctx
 
 
 class PasswordChange(SuccessMessageMixin, av.PasswordChangeView):

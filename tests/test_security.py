@@ -271,21 +271,16 @@ class ThrottleTests(TestCase):
             self.assertTrue(self.logged_in(self.attempt(u, pw))); self.client.logout()
 
 
-class SampleAccountsBoxTests(TestCase):
+class LoginPageHidesPasswordsTests(TestCase):
     def setUp(self): call_command("seed_data", stdout=io.StringIO())
 
-    def test_shown_on_this_computer_with_all_existing_accounts(self):
-        r = self.client.get("/login/"); self.assertContains(r, "Sign-in accounts on this computer")
-        for name, pw, _ in ACCOUNTS: self.assertContains(r, f"<code>{name}</code>"); self.assertContains(r, f"<code>{pw}</code>")
-        self.assertContains(r, "seed_data --reset-passwords")
-
-    def test_only_lists_accounts_that_exist(self):
-        User.objects.filter(username="researcher").delete(); r = self.client.get("/login/")
-        self.assertNotContains(r, "<code>researcher</code>"); self.assertContains(r, "<code>manager</code>")
+    def test_login_page_never_shows_passwords_on_this_computer(self):
+        r = self.client.get("/login/"); self.assertNotContains(r, "Sign-in accounts")
+        for name, pw, _ in ACCOUNTS: self.assertNotContains(r, f"<code>{pw}</code>"); self.assertNotContains(r, pw)
 
     @override_settings(LOCAL_MODE=False)
     def test_never_shown_when_hosted(self):
-        r = self.client.get("/login/"); self.assertNotContains(r, "Sign-in accounts on this computer"); self.assertNotContains(r, "Customer@12345")
+        r = self.client.get("/login/"); self.assertNotContains(r, "Sign-in accounts"); self.assertNotContains(r, "Customer@12345")
 
     def test_setup_script_prints_the_same_passwords(self):
         text = (BASE / "setup_and_run.py").read_text(encoding="utf-8")

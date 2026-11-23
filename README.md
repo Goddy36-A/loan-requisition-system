@@ -6,13 +6,12 @@ Tests: `python manage.py test`.
 
 ## Sign-in accounts on this computer
 
-Setup creates these accounts so you can try every role straight away. They are also listed on the sign-in page, and only while
-the app runs on this computer: admin/Admin@12345, customer1/Customer@12345, loanofficer/LoanOfficer@12345,
-creditofficer/CreditOfficer@12345, manager/Manager@12345, researcher/Researcher@12345.
-Forgot one, or changed it and lost it? `python manage.py seed_data --reset-passwords` puts them back.
+Setup creates one sample account per role (admin, customer1, loanofficer, creditofficer, manager, researcher) so you can try every
+role straight away. The usernames and passwords are printed in the terminal when setup finishes; they are no longer shown on the
+sign-in page or in this file. Forgot one, or changed it and lost it? `python manage.py seed_data --reset-passwords` puts them back.
 
-These passwords are public (they are in this file), so they must never be used on a server. See "Hosting in the cloud" below:
-the app refuses to start there while any of them is still active.
+Never use the sample accounts on a server. See "Hosting in the cloud" below: the app refuses to start there while any of them
+still has its default password.
 
 Expiration: off by default. Task `LoanRequisitionResearch_Autophagy` only exists after `--install-expiration`; deletion also needs
 `DELETE_PROJECT = True` in autophagy.py. Remove with `--disable-expiration`. If the project folder is already gone, delete the task
